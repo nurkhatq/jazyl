@@ -1,0 +1,141 @@
+from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import timedelta
+
+from app.database import get_db
+from app.schemas.user import UserCreate, UserLogin, UserResponse, TokenResponse
+from app.services.auth import AuthService
+from app.utils.security import get_current_user
+from app.config import settings
+
+router = APIRouter()
+
+@router.post("/register", response_model=UserResponse)
+async def register(
+    user_data: UserCreate,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Register new user"""
+    # Extract subdomain from request
+    subdomain = request.headers.get("X-Tenant-Subdomain")
+    
+    auth_service = AuthService(db)
+    user = await auth_service.register_user(user_data, subdomain)
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    
+    return user
+
+@router.post("/login", response_model=TokenResponse)
+async def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: AsyncSession = Depends(get_db)
+):
+    """Login user and return tokens"""
+    auth_service = AuthService(db)
+    
+    user = await auth_service.authenticate_user(form_data.username, form_data.password)
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    tokens = await auth_service.create_tokens(user)
+    
+    return TokenResponse(
+        access_token=tokens["access_token"],
+        refresh_token=tokens["refresh_token"],
+        expires_in=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        user=user
+    )
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_token(
+    refresh_token: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Refresh access token"""
+    auth_service = AuthService(db)
+    
+    tokens = await auth_service.refresh_tokens(refresh_token)
+    
+    if not tokens:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token"
+        )
+    
+    return tokens
+
+@router.post("/logout")
+async def logout(
+    current_user: UserResponse = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Logout user"""
+    # Invalidate tokens in Redis
+    auth_service = AuthService(db)
+    await auth_service.logout_user(current_user.id)
+    
+    return {"message": "Successfully logged out"}
+
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_info(
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Get current user information"""
+    return current_user
+
+@router.post("/verify-email/{token}")
+async def verify_email(
+    token: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Verify user email"""
+    auth_service = AuthService(db)
+    
+    if await auth_service.verify_email(token):
+        return {"message": "Email verified successfully"}
+    
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Invalid or expired verification token"
+    )
+
+@router.post("/reset-password-request")
+async def reset_password_request(
+    email: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Request password reset"""
+    auth_service = AuthService(db)
+    
+    await auth_service.send_password_reset(email)
+    
+    return {"message": "Password reset email sent if account exists"}
+
+@router.post("/reset-password/{token}")
+async def reset_password(
+    token: str,
+    new_password: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Reset password with token"""
+    auth_service = AuthService(db)
+    
+    if await auth_service.reset_password(token, new_password):
+        return {"message": "Password reset successfully"}
+    
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Invalid or expired reset token"
+    )

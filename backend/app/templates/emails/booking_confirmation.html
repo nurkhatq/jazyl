@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Booking Confirmation - {{ barbershop_name }}{% endblock %}
+
+{% block content %}
+<h2>Hello {{ client_name }},</h2>
+
+<p>Your booking has been successfully created! Please confirm your appointment by clicking the button below:</p>
+
+<div style="text-align: center;">
+    <a href="{{ confirmation_link }}" class="button">Confirm Booking</a>
+</div>
+
+<div class="info-box">
+    <h3>Booking Details:</h3>
+    <div class="info-row">
+        <span class="info-label">Barbershop:</span>
+        <span>{{ barbershop_name }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Address:</span>
+        <span>{{ barbershop_address }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Phone:</span>
+        <span>{{ barbershop_phone }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Master:</span>
+        <span>{{ master_name }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Service:</span>
+        <span>{{ service_name }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Date:</span>
+        <span>{{ booking_date }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Time:</span>
+        <span>{{ booking_time }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Price:</span>
+        <span>${{ price }}</span>
+    </div>
+</div>
+
+<p>Need to cancel? <a href="{{ cancellation_link }}">Click here to cancel your booking</a></p>
+
+<p>We look forward to seeing you!</p>
+{% endblock %}

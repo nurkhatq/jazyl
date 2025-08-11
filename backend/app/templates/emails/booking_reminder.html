@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}Appointment Reminder - {{ barbershop_name }}{% endblock %}
+
+{% block content %}
+<h2>Hello {{ client_name }},</h2>
+
+<p>This is a friendly reminder about your upcoming appointment {% if hours_before == 24 %}tomorrow{% else %}in {{ hours_before }} hours{% endif %}!</p>
+
+<div class="info-box">
+    <h3>Appointment Details:</h3>
+    <div class="info-row">
+        <span class="info-label">Barbershop:</span>
+        <span>{{ barbershop_name }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Master:</span>
+        <span>{{ master_name }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Service:</span>
+        <span>{{ service_name }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Date:</span>
+        <span>{{ booking_date }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Time:</span>
+        <span>{{ booking_time }}</span>
+    </div>
+</div>
+
+<p>If you need to cancel or reschedule, please <a href="{{ cancellation_link }}">click here</a>.</p>
+
+<p>We look forward to seeing you!</p>
+{% endblock %}

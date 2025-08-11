@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Booking Cancelled - {{ barbershop_name }}{% endblock %}
+
+{% block content %}
+<h2>Hello {{ client_name }},</h2>
+
+<p>Your appointment has been cancelled.</p>
+
+<div class="info-box">
+    <h3>Cancelled Appointment:</h3>
+    <div class="info-row">
+        <span class="info-label">Barbershop:</span>
+        <span>{{ barbershop_name }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Service:</span>
+        <span>{{ service_name }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Date:</span>
+        <span>{{ booking_date }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Time:</span>
+        <span>{{ booking_time }}</span>
+    </div>
+</div>
+
+<p>We hope to see you again soon! Feel free to book another appointment at your convenience.</p>
+
+<div style="text-align: center; margin-top: 30px;">
+    <a href="https://{{ subdomain }}.jazyl.tech" class="button">Book New Appointment</a>
+</div>
+{% endblock %}
