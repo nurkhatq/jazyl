@@ -2,12 +2,17 @@
 const nextConfig = {
   output: 'standalone',
   reactStrictMode: true,
+  swcMinify: true,
+  
+  experimental: {
+    outputFileTracingRoot: undefined,
+  },
   
   async rewrites() {
     return [
       {
         source: '/api/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_URL}/:path*`,
+        destination: `${process.env.NEXT_PUBLIC_API_URL || 'https://api.jazyl.tech'}/:path*`,
       },
     ];
   },
@@ -36,11 +41,12 @@ const nextConfig = {
   
   images: {
     domains: ['jazyl.tech', 'api.jazyl.tech'],
+    unoptimized: true,
   },
   
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
-    NEXT_PUBLIC_DOMAIN: process.env.NEXT_PUBLIC_DOMAIN,
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'https://api.jazyl.tech',
+    NEXT_PUBLIC_DOMAIN: process.env.NEXT_PUBLIC_DOMAIN || 'jazyl.tech',
   },
 };
 

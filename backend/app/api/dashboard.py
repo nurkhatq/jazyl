@@ -51,7 +51,7 @@ async def get_today_overview(
 
 @router.get("/revenue")
 async def get_revenue_report(
-    period: str = Query("month", regex="^(day|week|month|year)$"),
+    period: str = Query("month", pattern="^(day|week|month|year)$"),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
     tenant_id: UUID = Depends(get_current_tenant),

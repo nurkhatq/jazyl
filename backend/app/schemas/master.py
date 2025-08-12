@@ -5,8 +5,8 @@ from uuid import UUID
 
 class MasterScheduleSchema(BaseModel):
     day_of_week: int = Field(..., ge=0, le=6)
-    start_time: str = Field(..., regex='^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$')
-    end_time: str = Field(..., regex='^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$')
+    start_time: str = Field(..., pattern='^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$')
+    end_time: str = Field(..., pattern='^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$')
     is_working: bool = True
 
 class MasterBase(BaseModel):

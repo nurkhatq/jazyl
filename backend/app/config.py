@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     
     # Redis
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
+    REDIS_PASSWORD: str | None = os.getenv("REDIS_PASSWORD")
+    SSL_CERT_PATH: str | None = os.getenv("SSL_CERT_PATH")
+    SSL_KEY_PATH: str | None = os.getenv("SSL_KEY_PATH")
+
     
     # JWT
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY")

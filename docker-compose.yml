@@ -24,9 +24,10 @@ services:
       - NEXT_PUBLIC_API_URL=https://api.jazyl.tech
       - NEXT_PUBLIC_DOMAIN=jazyl.tech
     volumes:
-      - ./frontend:/app
       - /app/node_modules
       - /app/.next
+    ports:
+      - "3000:3000"
     networks:
       - jazyl-network
     restart: unless-stopped
@@ -41,6 +42,8 @@ services:
     depends_on:
       - postgres
       - redis
+    ports:
+      - "8000:8000"
     networks:
       - jazyl-network
     restart: unless-stopped

@@ -48,7 +48,7 @@ class NotificationService:
             content=f"Your booking for {booking['service_name']} on {booking['booking_date']} at {booking['booking_time']} has been created.",
             is_sent=True,
             sent_at=datetime.utcnow(),
-            metadata={"booking_id": str(booking_id)}
+            meta_data={"booking_id": str(booking_id)}
         )
         
         self.db.add(notification)

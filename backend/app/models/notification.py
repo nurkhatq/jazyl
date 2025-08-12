@@ -27,7 +27,7 @@ class Notification(Base):
     is_read = Column(Boolean, default=False)
     is_sent = Column(Boolean, default=False)
     
-    metadata = Column(JSON, default=dict)
+    meta_data = Column(JSON, default=dict)
     
     sent_at = Column(DateTime)
     read_at = Column(DateTime)

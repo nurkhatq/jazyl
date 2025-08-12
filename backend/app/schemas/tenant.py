@@ -26,8 +26,8 @@ class TenantUpdate(BaseModel):
     phone: Optional[str] = Field(None, max_length=20)
     address: Optional[str] = None
     logo_url: Optional[str] = None
-    primary_color: Optional[str] = Field(None, regex='^#[0-9A-Fa-f]{6}$')
-    secondary_color: Optional[str] = Field(None, regex='^#[0-9A-Fa-f]{6}$')
+    primary_color: Optional[str] = Field(None, pattern='^#[0-9A-Fa-f]{6}$')
+    secondary_color: Optional[str] = Field(None, pattern='^#[0-9A-Fa-f]{6}$')
     working_hours: Optional[Dict[str, Dict[str, str]]] = None
     booking_settings: Optional[Dict[str, Any]] = None
     notification_settings: Optional[Dict[str, Any]] = None
