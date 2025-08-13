@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, status
-from fastapi.middleware.cors import CORSMiddleware
+# from fastapi.middleware.cors import CORSMiddleware  # REMOVED - nginx handles CORS
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
@@ -49,14 +49,14 @@ app = FastAPI(
     redoc_url="/redoc" if settings.DEBUG else None,
 )
 
-# Add middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Add middleware (CORS REMOVED - nginx handles it)
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=settings.ALLOWED_ORIGINS,
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
 
 app.add_middleware(
     TrustedHostMiddleware,
