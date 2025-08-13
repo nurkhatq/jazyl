@@ -63,32 +63,55 @@ def require_role(roles: Union[UserRole, List[UserRole]]):
 
 async def get_current_tenant(
     request: Request,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> UUID:
-    # Get subdomain from request headers or host
+    """Get current tenant from user or request headers"""
+    
+    # First, try to get from authenticated user
+    if current_user and current_user.tenant_id:
+        return current_user.tenant_id
+    
+    # Then try from headers
+    tenant_id_header = request.headers.get("X-Tenant-ID")
+    if tenant_id_header:
+        try:
+            return UUID(tenant_id_header)
+        except ValueError:
+            pass
+    
+    # Try subdomain
     subdomain = request.headers.get("X-Tenant-Subdomain")
-    
-    if not subdomain:
-        # Try to extract from host
-        host = request.headers.get("host", "")
-        if ".jazyl.tech" in host:
-            subdomain = host.split(".jazyl.tech")[0]
-    
-    if not subdomain:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tenant not specified"
+    if subdomain:
+        result = await db.execute(
+            select(Tenant).where(Tenant.subdomain == subdomain)
         )
+        tenant = result.scalar_one_or_none()
+        if tenant:
+            return tenant.id
     
-    result = await db.execute(
-        select(Tenant).where(Tenant.subdomain == subdomain)
+    # Last resort - try to extract from host
+    host = request.headers.get("host", "")
+    if ".jazyl.tech" in host:
+        subdomain = host.split(".jazyl.tech")[0]
+        result = await db.execute(
+            select(Tenant).where(Tenant.subdomain == subdomain)
+        )
+        tenant = result.scalar_one_or_none()
+        if tenant:
+            return tenant.id
+    
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Tenant not specified"
     )
-    tenant = result.scalar_one_or_none()
-    
-    if not tenant or not tenant.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Tenant not found"
-        )
-    
-    return tenant.id
+
+async def get_optional_current_tenant(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+) -> Optional[UUID]:
+    """Get current tenant without requiring it"""
+    try:
+        return await get_current_tenant(request, None, db)
+    except:
+        return None

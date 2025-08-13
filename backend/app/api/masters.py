@@ -1,28 +1,27 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List, Optional
-from datetime import date
-import datetime
-from uuid import UUID
 from sqlalchemy import select, and_
+from typing import List, Optional
+from datetime import date, datetime
+from uuid import UUID
 
 from app.database import get_db
 from app.schemas.master import MasterCreate, MasterUpdate, MasterResponse
 from app.services.master import MasterService
 from app.services.notification import NotificationService
 from app.utils.security import get_current_user, require_role, get_current_tenant
-from app.models.user import UserRole
-from app.utils.email import EmailService
+from app.models.user import UserRole, User
 from app.models.master import Master
-from app.models.booking import Booking
+from app.models.booking import Booking, BookingStatus
+from app.utils.email import EmailService
 
 router = APIRouter()
 
 @router.post("/", response_model=MasterResponse)
 async def create_master(
-    master_data: dict,  # Принимаем dict вместо MasterCreate для гибкости
+    master_data: dict,
     background_tasks: BackgroundTasks,
-    current_user = Depends(require_role(UserRole.OWNER)),
+    current_user: User = Depends(require_role(UserRole.OWNER)),
     db: AsyncSession = Depends(get_db)
 ):
     """Create new master"""
@@ -35,13 +34,12 @@ async def create_master(
             master_data
         )
         
-        # Если был создан новый пользователь, отправляем email с инструкциями
         if 'user_email' in master_data:
             background_tasks.add_task(
                 email_service.send_master_welcome_email,
                 master_data['user_email'],
                 master_data.get('user_first_name', ''),
-                current_user.tenant.name if hasattr(current_user, 'tenant') else 'Jazyl'
+                'Jazyl Barbershop'
             )
         
         return master
@@ -54,11 +52,17 @@ async def create_master(
 @router.get("/", response_model=List[MasterResponse])
 async def get_masters(
     is_active: Optional[bool] = Query(True),
-    tenant_id: UUID = Depends(get_current_tenant),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get all masters for tenant"""
     service = MasterService(db)
+    
+    # Use tenant_id from authenticated user
+    tenant_id = current_user.tenant_id
+    
+    if not tenant_id:
+        return []
     
     masters = await service.get_masters(
         tenant_id=tenant_id,
@@ -88,13 +92,12 @@ async def get_master(
 async def update_master(
     master_id: UUID,
     master_data: MasterUpdate,
-    current_user = Depends(require_role([UserRole.OWNER, UserRole.MASTER])),
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.MASTER])),
     db: AsyncSession = Depends(get_db)
 ):
     """Update master"""
     service = MasterService(db)
     
-    # Masters can only update their own profile
     if current_user.role == UserRole.MASTER:
         master = await service.get_master(master_id)
         if master.user_id != current_user.id:
@@ -116,7 +119,7 @@ async def update_master(
 @router.delete("/{master_id}")
 async def delete_master(
     master_id: UUID,
-    current_user = Depends(require_role(UserRole.OWNER)),
+    current_user: User = Depends(require_role(UserRole.OWNER)),
     db: AsyncSession = Depends(get_db)
 ):
     """Delete master (soft delete)"""
@@ -216,17 +219,12 @@ async def update_master_services(
     
     return {"message": "Services updated successfully"}
 
-# Добавьте эти endpoints в существующий файл
-
 @router.get("/my-profile", response_model=MasterResponse)
 async def get_my_profile(
-    current_user = Depends(require_role(UserRole.MASTER)),
+    current_user: User = Depends(require_role(UserRole.MASTER)),
     db: AsyncSession = Depends(get_db)
 ):
     """Get current master's profile"""
-    service = MasterService(db)
-    
-    # Найти профиль мастера по user_id
     result = await db.execute(
         select(Master).where(Master.user_id == current_user.id)
     )
@@ -242,11 +240,10 @@ async def get_my_profile(
 
 @router.get("/my-bookings/today")
 async def get_my_bookings_today(
-    current_user = Depends(require_role(UserRole.MASTER)),
+    current_user: User = Depends(require_role(UserRole.MASTER)),
     db: AsyncSession = Depends(get_db)
 ):
     """Get master's bookings for today"""
-    # Найти профиль мастера
     result = await db.execute(
         select(Master).where(Master.user_id == current_user.id)
     )
@@ -258,7 +255,6 @@ async def get_my_bookings_today(
             detail="Master profile not found"
         )
     
-    # Получить сегодняшние записи
     today_start = datetime.combine(date.today(), datetime.min.time())
     today_end = datetime.combine(date.today(), datetime.max.time())
     
@@ -275,13 +271,12 @@ async def get_my_bookings_today(
     )
     bookings = bookings_result.scalars().all()
     
-    # Форматировать данные
     return [
         {
             "id": str(booking.id),
             "time": booking.date.strftime("%H:%M"),
-            "client_name": "Client",  # Получить из связи
-            "service_name": "Service",  # Получить из связи
+            "client_name": "Client",
+            "service_name": "Service",
             "price": booking.price,
             "status": booking.status.value
         }
@@ -290,11 +285,10 @@ async def get_my_bookings_today(
 
 @router.get("/my-stats")
 async def get_my_stats(
-    current_user = Depends(require_role(UserRole.MASTER)),
+    current_user: User = Depends(require_role(UserRole.MASTER)),
     db: AsyncSession = Depends(get_db)
 ):
     """Get master's statistics"""
-    # Найти профиль мастера
     result = await db.execute(
         select(Master).where(Master.user_id == current_user.id)
     )
@@ -307,7 +301,6 @@ async def get_my_stats(
             "monthRevenue": 0
         }
     
-    # Здесь добавить реальные подсчеты
     return {
         "weekBookings": 15,
         "totalClients": 45,

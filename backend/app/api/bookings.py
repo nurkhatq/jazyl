@@ -6,6 +6,7 @@ from uuid import UUID
 
 from app.database import get_db
 from app.schemas.booking import BookingCreate, BookingUpdate, BookingResponse
+from app.models.user import User
 from app.services.booking import BookingService
 from app.services.notification import NotificationService
 from app.utils.security import get_current_user, get_current_tenant
@@ -17,12 +18,20 @@ router = APIRouter()
 async def create_booking(
     booking_data: BookingCreate,
     background_tasks: BackgroundTasks,
-    tenant_id: UUID = Depends(get_current_tenant),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Create new booking"""
     service = BookingService(db)
     notification_service = NotificationService(db)
+    
+    tenant_id = current_user.tenant_id
+    
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant not specified"
+        )
     
     # Check availability
     if not await service.check_availability(
@@ -53,11 +62,16 @@ async def get_bookings(
     date_to: Optional[date] = Query(None),
     master_id: Optional[UUID] = Query(None),
     status: Optional[BookingStatus] = Query(None),
-    tenant_id: UUID = Depends(get_current_tenant),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get bookings with filters"""
     service = BookingService(db)
+    
+    tenant_id = current_user.tenant_id
+    
+    if not tenant_id:
+        return []
     
     bookings = await service.get_bookings(
         tenant_id=tenant_id,

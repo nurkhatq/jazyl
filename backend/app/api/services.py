@@ -6,15 +6,15 @@ from uuid import UUID
 from app.database import get_db
 from app.schemas.service import ServiceCreate, ServiceUpdate, ServiceResponse
 from app.services.service import ServiceService
-from app.utils.security import get_current_user, require_role, get_current_tenant
-from app.models.user import UserRole
+from app.utils.security import get_current_tenant, get_current_user, require_role
+from app.models.user import UserRole, User
 
 router = APIRouter()
 
 @router.post("/", response_model=ServiceResponse)
 async def create_service(
     service_data: ServiceCreate,
-    current_user = Depends(require_role(UserRole.OWNER)),
+    current_user: User = Depends(require_role(UserRole.OWNER)),
     db: AsyncSession = Depends(get_db)
 ):
     """Create new service"""
@@ -31,11 +31,16 @@ async def create_service(
 async def get_services(
     category_id: Optional[UUID] = Query(None),
     is_active: Optional[bool] = Query(True),
-    tenant_id: UUID = Depends(get_current_tenant),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get all services for tenant"""
     service = ServiceService(db)
+    
+    tenant_id = current_user.tenant_id
+    
+    if not tenant_id:
+        return []
     
     services = await service.get_services(
         tenant_id=tenant_id,
