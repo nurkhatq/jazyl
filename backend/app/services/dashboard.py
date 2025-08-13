@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, extract
+from sqlalchemy import select, func, and_, extract, text
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date, timedelta
 from uuid import UUID
@@ -22,6 +22,8 @@ class DashboardService:
         user_role: UserRole = UserRole.OWNER,
         user_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
+        """Get dashboard statistics"""
+        
         # Default date range (last 30 days)
         if not date_to:
             date_to = date.today()
@@ -81,6 +83,8 @@ class DashboardService:
         user_role: UserRole = UserRole.OWNER,
         user_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
+        """Get today's overview"""
+        
         today = date.today()
         start_of_day = datetime.combine(today, datetime.min.time())
         end_of_day = datetime.combine(today, datetime.max.time())
@@ -130,10 +134,12 @@ class DashboardService:
     async def get_revenue_report(
         self,
         tenant_id: UUID,
-        period: str = "month",
+        period: str = "day",
         date_from: Optional[date] = None,
         date_to: Optional[date] = None
     ) -> List[Dict[str, Any]]:
+        """Get revenue report grouped by period"""
+        
         if not date_to:
             date_to = date.today()
         
@@ -147,44 +153,53 @@ class DashboardService:
             else:  # year
                 date_from = date_to - timedelta(days=365 * 5)
         
-        # Group by period
-        if period == "day":
-            date_trunc = func.date_trunc('day', Booking.date)
-        elif period == "week":
-            date_trunc = func.date_trunc('week', Booking.date)
-        elif period == "month":
-            date_trunc = func.date_trunc('month', Booking.date)
-        else:  # year
-            date_trunc = func.date_trunc('year', Booking.date)
+        # Простая реализация - возвращаем данные за последние 30 дней
+        revenue_data = []
+        current_date = date_from
         
-        result = await self.db.execute(
-            select(
-                date_trunc.label('period'),
-                func.count(Booking.id).label('bookings_count'),
-                func.sum(Booking.price).label('revenue')
-            )
-            .where(
-                and_(
-                    Booking.tenant_id == tenant_id,
-                    Booking.status == BookingStatus.COMPLETED,
-                    Booking.date >= datetime.combine(date_from, datetime.min.time()),
-                    Booking.date <= datetime.combine(date_to, datetime.max.time())
+        while current_date <= date_to:
+            # Получаем записи за день
+            start_of_day = datetime.combine(current_date, datetime.min.time())
+            end_of_day = datetime.combine(current_date, datetime.max.time())
+            
+            result = await self.db.execute(
+                select(
+                    func.count(Booking.id).label('bookings_count'),
+                    func.sum(Booking.price).label('revenue')
+                )
+                .where(
+                    and_(
+                        Booking.tenant_id == tenant_id,
+                        Booking.status == BookingStatus.COMPLETED,
+                        Booking.date >= start_of_day,
+                        Booking.date <= end_of_day
+                    )
                 )
             )
-            .group_by(date_trunc)
-            .order_by(date_trunc)
-        )
-        
-        rows = result.all()
-        
-        return [
-            {
-                "period": row.period.isoformat() if row.period else None,
-                "bookings_count": row.bookings_count,
+            
+            row = result.one()
+            
+            revenue_data.append({
+                "period": current_date.isoformat(),
+                "bookings_count": row.bookings_count or 0,
                 "revenue": float(row.revenue) if row.revenue else 0
-            }
-            for row in rows
-        ]
+            })
+            
+            # Increment based on period
+            if period == "day":
+                current_date += timedelta(days=1)
+            elif period == "week":
+                current_date += timedelta(weeks=1)
+            elif period == "month":
+                # Move to next month
+                if current_date.month == 12:
+                    current_date = current_date.replace(year=current_date.year + 1, month=1)
+                else:
+                    current_date = current_date.replace(month=current_date.month + 1)
+            else:  # year
+                current_date = current_date.replace(year=current_date.year + 1)
+        
+        return revenue_data
     
     async def get_masters_performance(
         self,
@@ -192,6 +207,8 @@ class DashboardService:
         date_from: Optional[date] = None,
         date_to: Optional[date] = None
     ) -> List[Dict[str, Any]]:
+        """Get masters performance report"""
+        
         if not date_to:
             date_to = date.today()
         if not date_from:
@@ -203,9 +220,9 @@ class DashboardService:
                 Master.display_name,
                 func.count(Booking.id).label('bookings_count'),
                 func.sum(Booking.price).label('revenue'),
-                func.avg(Master.rating).label('rating')
+                Master.rating
             )
-            .join(Booking, Master.id == Booking.master_id)
+            .join(Booking, Master.id == Booking.master_id, isouter=True)
             .where(
                 and_(
                     Master.tenant_id == tenant_id,
@@ -214,8 +231,8 @@ class DashboardService:
                     Booking.date <= datetime.combine(date_to, datetime.max.time())
                 )
             )
-            .group_by(Master.id, Master.display_name)
-            .order_by(func.sum(Booking.price).desc())
+            .group_by(Master.id, Master.display_name, Master.rating)
+            .order_by(func.sum(Booking.price).desc().nullslast())
         )
         
         rows = result.all()
@@ -224,7 +241,7 @@ class DashboardService:
             {
                 "master_id": str(row.id),
                 "name": row.display_name,
-                "bookings_count": row.bookings_count,
+                "bookings_count": row.bookings_count or 0,
                 "revenue": float(row.revenue) if row.revenue else 0,
                 "rating": float(row.rating) if row.rating else 0
             }
@@ -236,6 +253,8 @@ class DashboardService:
         tenant_id: UUID,
         limit: int = 10
     ) -> List[Dict[str, Any]]:
+        """Get most popular services"""
+        
         result = await self.db.execute(
             select(
                 Service.id,
@@ -244,7 +263,7 @@ class DashboardService:
                 func.count(Booking.id).label('bookings_count'),
                 func.sum(Booking.price).label('revenue')
             )
-            .join(Booking, Service.id == Booking.service_id)
+            .join(Booking, Service.id == Booking.service_id, isouter=True)
             .where(
                 and_(
                     Service.tenant_id == tenant_id,
@@ -263,7 +282,7 @@ class DashboardService:
                 "service_id": str(row.id),
                 "name": row.name,
                 "price": float(row.price),
-                "bookings_count": row.bookings_count,
+                "bookings_count": row.bookings_count or 0,
                 "revenue": float(row.revenue) if row.revenue else 0
             }
             for row in rows
@@ -274,6 +293,8 @@ class DashboardService:
         tenant_id: UUID,
         limit: int = 10
     ) -> List[Dict[str, Any]]:
+        """Get top clients by revenue"""
+        
         result = await self.db.execute(
             select(
                 Client.id,
@@ -290,7 +311,7 @@ class DashboardService:
                     Client.is_blacklisted == False
                 )
             )
-            .order_by(Client.total_spent.desc())
+            .order_by(Client.total_spent.desc().nullslast())
             .limit(limit)
         )
         
@@ -301,7 +322,7 @@ class DashboardService:
                 "client_id": str(row.id),
                 "name": f"{row.first_name} {row.last_name or ''}".strip(),
                 "email": row.email,
-                "total_visits": row.total_visits,
+                "total_visits": row.total_visits or 0,
                 "total_spent": float(row.total_spent) if row.total_spent else 0,
                 "last_visit": row.last_visit.isoformat() if row.last_visit else None
             }
