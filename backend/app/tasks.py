@@ -4,21 +4,16 @@ from sqlalchemy import select, and_
 from app.database import AsyncSessionLocal
 from app.models.booking import Booking, BookingStatus
 from app.services.notification import NotificationService
+import asyncio
 
 @shared_task(bind=True)
-async def send_reminder(self, booking_id: str, hours_before: int):
-    """Send booking reminder"""
-    async with AsyncSessionLocal() as db:
-        service = NotificationService(db)
-        await service.send_booking_reminder(booking_id, hours_before)
+def check_and_send_reminders(self):
+    asyncio.run(_check_and_send_reminders())
 
-@shared_task(bind=True)
-async def check_and_send_reminders(self):
-    """Check and send pending reminders"""
+async def _check_and_send_reminders():
     async with AsyncSessionLocal() as db:
         now = datetime.utcnow()
         
-        # 24 hour reminders
         reminder_time_24h = now + timedelta(hours=24)
         result_24h = await db.execute(
             select(Booking).where(
@@ -35,7 +30,6 @@ async def check_and_send_reminders(self):
         for booking in bookings_24h:
             await service.send_booking_reminder(booking.id, 24)
         
-        # 2 hour reminders
         reminder_time_2h = now + timedelta(hours=2)
         result_2h = await db.execute(
             select(Booking).where(
@@ -51,8 +45,19 @@ async def check_and_send_reminders(self):
             await service.send_booking_reminder(booking.id, 2)
 
 @shared_task(bind=True)
-async def cleanup_old_bookings(self):
-    """Mark old unconfirmed bookings as cancelled"""
+def send_reminder(self, booking_id: str, hours_before: int):
+    asyncio.run(_send_reminder(booking_id, hours_before))
+
+async def _send_reminder(booking_id: str, hours_before: int):
+    async with AsyncSessionLocal() as db:
+        service = NotificationService(db)
+        await service.send_booking_reminder(booking_id, hours_before)
+
+@shared_task(bind=True)
+def cleanup_old_bookings(self):
+    asyncio.run(_cleanup_old_bookings())
+
+async def _cleanup_old_bookings():
     async with AsyncSessionLocal() as db:
         cutoff_time = datetime.utcnow() - timedelta(hours=24)
         
