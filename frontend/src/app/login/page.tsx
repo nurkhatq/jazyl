@@ -22,12 +22,17 @@ export default function LoginPage() {
     password: '',
   })
 
+  // В handleSubmit после успешного логина добавьте лог для отладки:
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
 
     try {
       const response = await login(formData.email, formData.password)
+      
+      console.log('Login response:', response)
+      console.log('User role:', response.user.role)
       
       // Store auth data
       setAuth(response.access_token, response.refresh_token, response.user)
@@ -37,24 +42,33 @@ export default function LoginPage() {
         description: "Welcome back!",
       })
 
+      // Small delay to ensure cookies are set
+      await new Promise(resolve => setTimeout(resolve, 100))
+
       // Redirect based on user role
       switch (response.user.role) {
         case 'owner':
+          console.log('Redirecting to /dashboard')
           router.push('/dashboard')
           break
         case 'master':
+          console.log('Redirecting to /master')
           router.push('/master')
           break
         case 'admin':
+          console.log('Redirecting to /admin')
           router.push('/admin')
           break
         case 'client':
+          console.log('Redirecting to /profile')
           router.push('/profile')
           break
         default:
+          console.log('Redirecting to /')
           router.push('/')
       }
     } catch (error: any) {
+      console.error('Login error:', error)
       toast({
         title: "Login Failed",
         description: error.response?.data?.detail || "Invalid email or password",
