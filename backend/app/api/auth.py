@@ -111,6 +111,16 @@ async def verify_email(
         detail="Invalid or expired verification token"
     )
 
+from fastapi.responses import RedirectResponse
+
+@router.get("/verify-email/{token}")
+async def verify_email_get(token: str, db: AsyncSession = Depends(get_db)):
+    auth_service = AuthService(db)
+    if await auth_service.verify_email(token):
+        return RedirectResponse(url="https://jazyl.tech/login", status_code=302)
+    return RedirectResponse(url="https://jazyl.tech/verification-error", status_code=302)
+
+
 @router.post("/reset-password-request")
 async def reset_password_request(
     email: str,

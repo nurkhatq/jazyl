@@ -58,7 +58,8 @@ class EmailService:
     ) -> bool:
         template = self.env.get_template('verification.html')
         
-        verification_link = f"https://jazyl.tech/verify-email/{verification_token}"
+        verification_link = f"https://api.jazyl.tech/api/auth/verify-email/{verification_token}"
+
         
         html_content = template.render(
             user_name=user_name,
