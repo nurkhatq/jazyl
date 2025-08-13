@@ -4,7 +4,8 @@ from sqlalchemy import select, and_
 from typing import List, Optional
 from datetime import date, datetime
 from uuid import UUID
-
+from sqlalchemy.orm import selectinload
+from sqlalchemy import select
 from app.database import get_db
 from app.schemas.master import MasterCreate, MasterUpdate, MasterResponse
 from app.services.master import MasterService
@@ -33,7 +34,16 @@ async def create_master(
             current_user.tenant_id,
             master_data
         )
-        
+
+        # 🔹 Подгружаем schedules
+        stmt = (
+            select(Master)
+            .options(selectinload(Master.schedules))
+            .where(Master.id == master.id)
+        )
+        result = await db.execute(stmt)
+        master = result.scalar_one()
+
         if 'user_email' in master_data:
             background_tasks.add_task(
                 email_service.send_master_welcome_email,
@@ -49,6 +59,7 @@ async def create_master(
             detail=str(e)
         )
 
+
 @router.get("/", response_model=List[MasterResponse])
 async def get_masters(
     is_active: Optional[bool] = Query(True),
@@ -56,20 +67,21 @@ async def get_masters(
     db: AsyncSession = Depends(get_db)
 ):
     """Get all masters for tenant"""
-    service = MasterService(db)
-    
-    # Use tenant_id from authenticated user
     tenant_id = current_user.tenant_id
-    
     if not tenant_id:
         return []
-    
-    masters = await service.get_masters(
-        tenant_id=tenant_id,
-        is_active=is_active
+
+    stmt = (
+        select(Master)
+        .options(selectinload(Master.schedules))  # подгружаем расписание
+        .where(Master.tenant_id == tenant_id)
     )
-    
-    return masters
+    if is_active is not None:
+        stmt = stmt.where(Master.is_active == is_active)
+
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
 
 @router.get("/{master_id}", response_model=MasterResponse)
 async def get_master(
@@ -77,9 +89,14 @@ async def get_master(
     db: AsyncSession = Depends(get_db)
 ):
     """Get master by ID"""
-    service = MasterService(db)
-    master = await service.get_master(master_id)
-    
+    stmt = (
+        select(Master)
+        .options(selectinload(Master.schedules))  # подгружаем расписание
+        .where(Master.id == master_id)
+    )
+    result = await db.execute(stmt)
+    master = result.scalar_one_or_none()
+
     if not master:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
