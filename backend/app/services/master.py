@@ -3,36 +3,77 @@ from sqlalchemy import select, and_, delete
 from typing import Optional, List
 from datetime import date, datetime
 from uuid import UUID
+import secrets
 
 from app.models.master import Master, MasterSchedule, MasterService
 from app.models.block_time import BlockTime
+from app.models.user import User, UserRole
 from app.schemas.master import MasterCreate, MasterUpdate
+from passlib.context import CryptContext
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 class MasterService:
     def __init__(self, db: AsyncSession):
         self.db = db
     
-    async def create_master(self, tenant_id: UUID, master_data: MasterCreate) -> Master:
-        # Create master
+    async def create_master(self, tenant_id: UUID, master_data: dict) -> Master:
+        # Если предоставлены данные для создания пользователя
+        if 'user_email' in master_data:
+            # Проверяем, существует ли уже пользователь с таким email
+            existing_user = await self.db.execute(
+                select(User).where(User.email == master_data['user_email'])
+            )
+            user = existing_user.scalar_one_or_none()
+            
+            if not user:
+                # Создаем нового пользователя
+                temp_password = secrets.token_urlsafe(12)  # Генерируем временный пароль
+                user = User(
+                    email=master_data['user_email'],
+                    first_name=master_data.get('user_first_name', ''),
+                    last_name=master_data.get('user_last_name', ''),
+                    hashed_password=pwd_context.hash(temp_password),
+                    role=UserRole.MASTER,
+                    tenant_id=tenant_id,
+                    is_active=True,
+                    is_verified=False,  # Потребуется верификация email
+                    verification_token=secrets.token_urlsafe(32)
+                )
+                self.db.add(user)
+                await self.db.flush()
+                
+                # TODO: Отправить email с временным паролем и ссылкой для установки нового
+                print(f"Created user for master with temp password: {temp_password}")
+            
+            user_id = user.id
+        else:
+            # Используем предоставленный user_id
+            user_id = master_data.get('user_id')
+            if not user_id:
+                raise ValueError("Either user_id or user_email must be provided")
+        
+        # Создаем мастера
         master = Master(
             tenant_id=tenant_id,
-            user_id=master_data.user_id,
-            display_name=master_data.display_name,
-            description=master_data.description,
-            photo_url=master_data.photo_url,
-            specialization=master_data.specialization
+            user_id=user_id,
+            display_name=master_data['display_name'],
+            description=master_data.get('description'),
+            photo_url=master_data.get('photo_url'),
+            specialization=master_data.get('specialization', [])
         )
         
         self.db.add(master)
         await self.db.flush()
         
-        # Create schedules
-        for schedule_data in master_data.schedules:
-            schedule = MasterSchedule(
-                master_id=master.id,
-                **schedule_data.dict()
-            )
-            self.db.add(schedule)
+        # Создаем расписание если предоставлено
+        if 'schedules' in master_data:
+            for schedule_data in master_data['schedules']:
+                schedule = MasterSchedule(
+                    master_id=master.id,
+                    **schedule_data
+                )
+                self.db.add(schedule)
         
         await self.db.commit()
         await self.db.refresh(master)

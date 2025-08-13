@@ -38,12 +38,21 @@ export default function LoginPage() {
       })
 
       // Redirect based on user role
-      if (response.user.role === 'owner') {
-        router.push('/dashboard')
-      } else if (response.user.role === 'master') {
-        router.push('/master-dashboard')
-      } else {
-        router.push('/')
+      switch (response.user.role) {
+        case 'owner':
+          router.push('/dashboard')
+          break
+        case 'master':
+          router.push('/master')
+          break
+        case 'admin':
+          router.push('/admin')
+          break
+        case 'client':
+          router.push('/profile')
+          break
+        default:
+          router.push('/')
       }
     } catch (error: any) {
       toast({
@@ -111,6 +120,16 @@ export default function LoginPage() {
                 )}
               </Button>
             </form>
+
+            {/* Подсказка для тестирования */}
+            {process.env.NODE_ENV === 'development' && (
+              <div className="mt-6 p-4 bg-gray-100 rounded-lg text-sm">
+                <p className="font-semibold mb-2">Test Accounts:</p>
+                <p>Owner: admin@jazyl.tech</p>
+                <p>Master: (create via dashboard)</p>
+                <p>Password: Admin123!</p>
+              </div>
+            )}
 
             <div className="mt-6 text-center text-sm">
               Don't have an account?{' '}

@@ -92,7 +92,57 @@ class EmailService:
             subject="Reset your Jazyl password",
             html_content=html_content
         )
-    
+
+    async def send_master_welcome_email(
+        self,
+        to_email: str,
+        master_name: str,
+        barbershop_name: str
+    ) -> bool:
+        """Send welcome email to new master with login instructions"""
+        
+        html_content = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2>Welcome to {barbershop_name} on Jazyl!</h2>
+                
+                <p>Hello {master_name},</p>
+                
+                <p>You have been added as a master at {barbershop_name}. Your account has been created with the following email:</p>
+                
+                <p><strong>Email:</strong> {to_email}</p>
+                
+                <p>To complete your registration and set your password, please click the link below:</p>
+                
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="https://jazyl.tech/set-password?email={to_email}" 
+                    style="background-color: #000; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
+                        Set Your Password
+                    </a>
+                </div>
+                
+                <p>After setting your password, you can log in to your dashboard at:</p>
+                <p><a href="https://jazyl.tech/login">https://jazyl.tech/login</a></p>
+                
+                <p>If you have any questions, please contact your barbershop administrator.</p>
+                
+                <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
+                
+                <p style="color: #666; font-size: 12px;">
+                    This email was sent from Jazyl - Barbershop Management Platform<br>
+                    © 2025 Jazyl. All rights reserved.
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return await self.send_email(
+            to_email=to_email,
+            subject=f"Welcome to {barbershop_name} - Set Your Password",
+            html_content=html_content
+        )
     async def send_booking_confirmation(self, **kwargs) -> bool:
         template = self.env.get_template('booking_confirmation.html')
         html_content = template.render(**kwargs)

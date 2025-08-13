@@ -41,8 +41,18 @@ export function MasterDialog({ open, onOpenChange, master }: MasterDialogProps) 
         user_first_name: '',
         user_last_name: '',
       })
+    } else {
+      // Reset form for new master
+      setFormData({
+        display_name: '',
+        description: '',
+        specialization: '',
+        user_email: '',
+        user_first_name: '',
+        user_last_name: '',
+      })
     }
-  }, [master])
+  }, [master, open])
 
   const mutation = useMutation({
     mutationFn: (data: any) =>
@@ -52,15 +62,18 @@ export function MasterDialog({ open, onOpenChange, master }: MasterDialogProps) 
     onSuccess: () => {
       toast({
         title: master ? 'Master Updated' : 'Master Created',
-        description: 'The master has been successfully saved.',
+        description: master 
+          ? 'The master has been successfully updated.'
+          : 'The master has been created. They will receive an email with login instructions.',
       })
       queryClient.invalidateQueries({ queryKey: ['masters'] })
       onOpenChange(false)
     },
-    onError: () => {
+    onError: (error: any) => {
+      console.error('Error saving master:', error)
       toast({
         title: 'Error',
-        description: 'Failed to save master. Please try again.',
+        description: error.response?.data?.detail || 'Failed to save master. Please try again.',
         variant: 'destructive',
       })
     },
@@ -69,21 +82,20 @@ export function MasterDialog({ open, onOpenChange, master }: MasterDialogProps) 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     
-    const data = {
+    const data: any = {
       display_name: formData.display_name,
       description: formData.description,
-      specialization: formData.specialization.split(',').map(s => s.trim()),
+      specialization: formData.specialization.split(',').map(s => s.trim()).filter(s => s),
     }
     
     if (!master) {
-      // Include user creation data for new master
-      Object.assign(data, {
-        user_email: formData.user_email,
-        user_first_name: formData.user_first_name,
-        user_last_name: formData.user_last_name,
-      })
+      // For new master, include user creation data
+      data.user_email = formData.user_email
+      data.user_first_name = formData.user_first_name
+      data.user_last_name = formData.user_last_name
     }
     
+    console.log('Submitting master data:', data)
     mutation.mutate(data)
   }
 
@@ -96,11 +108,12 @@ export function MasterDialog({ open, onOpenChange, master }: MasterDialogProps) 
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <Label htmlFor="display_name">Display Name</Label>
+            <Label htmlFor="display_name">Display Name *</Label>
             <Input
               id="display_name"
               value={formData.display_name}
               onChange={(e) => setFormData({ ...formData, display_name: e.target.value })}
+              placeholder="John Doe"
               required
             />
           </div>
@@ -108,19 +121,23 @@ export function MasterDialog({ open, onOpenChange, master }: MasterDialogProps) 
           {!master && (
             <>
               <div>
-                <Label htmlFor="user_email">Email</Label>
+                <Label htmlFor="user_email">Email *</Label>
                 <Input
                   id="user_email"
                   type="email"
                   value={formData.user_email}
                   onChange={(e) => setFormData({ ...formData, user_email: e.target.value })}
+                  placeholder="john@example.com"
                   required
                 />
+                <p className="text-xs text-muted-foreground mt-1">
+                  The master will receive login instructions at this email
+                </p>
               </div>
               
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="user_first_name">First Name</Label>
+                  <Label htmlFor="user_first_name">First Name *</Label>
                   <Input
                     id="user_first_name"
                     value={formData.user_first_name}
@@ -130,7 +147,7 @@ export function MasterDialog({ open, onOpenChange, master }: MasterDialogProps) 
                 </div>
                 
                 <div>
-                  <Label htmlFor="user_last_name">Last Name</Label>
+                  <Label htmlFor="user_last_name">Last Name *</Label>
                   <Input
                     id="user_last_name"
                     value={formData.user_last_name}
@@ -159,6 +176,7 @@ export function MasterDialog({ open, onOpenChange, master }: MasterDialogProps) 
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               rows={3}
+              placeholder="Brief description about the master..."
             />
           </div>
           
@@ -167,7 +185,7 @@ export function MasterDialog({ open, onOpenChange, master }: MasterDialogProps) 
               Cancel
             </Button>
             <Button type="submit" disabled={mutation.isPending}>
-              {mutation.isPending ? 'Saving...' : 'Save'}
+              {mutation.isPending ? 'Saving...' : (master ? 'Update' : 'Create Master')}
             </Button>
           </div>
         </form>
