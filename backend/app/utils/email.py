@@ -93,6 +93,9 @@ class EmailService:
             html_content=html_content
         )
 
+    
+    # Замените метод send_master_welcome_email на этот исправленный:
+
     async def send_master_welcome_email(
         self,
         to_email: str,
@@ -101,38 +104,112 @@ class EmailService:
     ) -> bool:
         """Send welcome email to new master with login instructions"""
         
+        # Создаем ссылку без токена, только с email
+        set_password_link = f"https://jazyl.tech/set-password?email={to_email}"
+        
         html_content = f"""
+        <!DOCTYPE html>
         <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                <h2>Welcome to {barbershop_name} on Jazyl!</h2>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                    max-width: 600px;
+                    margin: 0 auto;
+                    padding: 20px;
+                }}
+                .container {{
+                    background-color: #ffffff;
+                    border-radius: 10px;
+                    padding: 30px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                }}
+                .header {{
+                    text-align: center;
+                    margin-bottom: 30px;
+                    padding-bottom: 20px;
+                    border-bottom: 2px solid #f0f0f0;
+                }}
+                .logo {{
+                    font-size: 32px;
+                    font-weight: bold;
+                    color: #000;
+                }}
+                .button {{
+                    display: inline-block;
+                    padding: 12px 30px;
+                    background-color: #000;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 5px;
+                    margin: 20px 0;
+                }}
+                .button:hover {{
+                    background-color: #333;
+                }}
+                .info-box {{
+                    background-color: #f9f9f9;
+                    border-left: 4px solid #000;
+                    padding: 15px;
+                    margin: 20px 0;
+                }}
+                .footer {{
+                    margin-top: 30px;
+                    padding-top: 20px;
+                    border-top: 2px solid #f0f0f0;
+                    text-align: center;
+                    color: #666;
+                    font-size: 12px;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <div class="logo">Jazyl</div>
+                </div>
+                
+                <h2>Welcome to {barbershop_name}!</h2>
                 
                 <p>Hello {master_name},</p>
                 
-                <p>You have been added as a master at {barbershop_name}. Your account has been created with the following email:</p>
+                <p>You have been added as a master at <strong>{barbershop_name}</strong>. To complete your registration and access your dashboard, please set your password.</p>
                 
-                <p><strong>Email:</strong> {to_email}</p>
-                
-                <p>To complete your registration and set your password, please click the link below:</p>
-                
-                <div style="text-align: center; margin: 30px 0;">
-                    <a href="https://jazyl.tech/set-password?email={to_email}" 
-                    style="background-color: #000; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
-                        Set Your Password
-                    </a>
+                <div class="info-box">
+                    <p><strong>Your login email:</strong> {to_email}</p>
+                    <p><strong>Role:</strong> Master</p>
+                    <p><strong>Barbershop:</strong> {barbershop_name}</p>
                 </div>
                 
-                <p>After setting your password, you can log in to your dashboard at:</p>
+                <p>Click the button below to set your password:</p>
+                
+                <div style="text-align: center;">
+                    <a href="{set_password_link}" class="button">Set Your Password</a>
+                </div>
+                
+                <p>After setting your password, you can log in at:</p>
                 <p><a href="https://jazyl.tech/login">https://jazyl.tech/login</a></p>
+                
+                <h3>What you can do as a Master:</h3>
+                <ul>
+                    <li>View and manage your schedule</li>
+                    <li>See your upcoming appointments</li>
+                    <li>Manage your client notes</li>
+                    <li>Track your performance</li>
+                </ul>
                 
                 <p>If you have any questions, please contact your barbershop administrator.</p>
                 
-                <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
-                
-                <p style="color: #666; font-size: 12px;">
-                    This email was sent from Jazyl - Barbershop Management Platform<br>
-                    © 2025 Jazyl. All rights reserved.
-                </p>
+                <div class="footer">
+                    <p>This email was sent from Jazyl - Barbershop Management Platform</p>
+                    <p>© 2025 Jazyl. All rights reserved.</p>
+                    <p style="margin-top: 10px;">
+                        <small>If you didn't expect this email, please ignore it.</small>
+                    </p>
+                </div>
             </div>
         </body>
         </html>
@@ -143,6 +220,8 @@ class EmailService:
             subject=f"Welcome to {barbershop_name} - Set Your Password",
             html_content=html_content
         )
+
+
     async def send_booking_confirmation(self, **kwargs) -> bool:
         template = self.env.get_template('booking_confirmation.html')
         html_content = template.render(**kwargs)

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from datetime import timedelta
 
 from app.database import get_db
@@ -8,6 +9,7 @@ from app.schemas.user import UserCreate, UserLogin, UserResponse, TokenResponse
 from app.services.auth import AuthService
 from app.utils.security import get_current_user
 from app.config import settings
+from backend.app.models.user import User
 
 router = APIRouter()
 
@@ -149,3 +151,45 @@ async def reset_password(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="Invalid or expired reset token"
     )
+
+
+# Добавьте этот endpoint в существующий файл
+
+@router.post("/set-initial-password")
+async def set_initial_password(
+    data: dict,
+    db: AsyncSession = Depends(get_db)
+):
+    """Set initial password for newly created users (masters)"""
+    email = data.get('email')
+    password = data.get('password')
+    
+    if not email or not password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email and password are required"
+        )
+    
+    # Find user by email
+    result = await db.execute(
+        select(User).where(User.email == email)
+    )
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Check if user already has a real password set (not the temporary one)
+    # You might want to add a flag like 'password_set' to track this
+    
+    # Update password
+    auth_service = AuthService(db)
+    user.hashed_password = auth_service.get_password_hash(password)
+    user.is_verified = True  # Mark as verified since they're setting password
+    
+    await db.commit()
+    
+    return {"message": "Password set successfully"}
