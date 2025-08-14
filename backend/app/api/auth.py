@@ -9,7 +9,7 @@ from app.schemas.user import UserCreate, UserLogin, UserResponse, TokenResponse
 from app.services.auth import AuthService
 from app.utils.security import get_current_user
 from app.config import settings
-from backend.app.models.user import User
+from app.models.user import User
 
 router = APIRouter()
 

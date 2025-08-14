@@ -6,26 +6,44 @@ from app.models.booking import Booking, BookingStatus
 from app.services.notification import NotificationService
 import asyncio
 
+
 # ─────────────── Helper ─────────────── #
 def run_async(coro):
     """
     Запускает async функцию внутри новой event loop,
     чтобы избежать ошибки 'attached to a different loop'.
     """
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
     try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+        # Try to get the current loop
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If loop is running, create a new one
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
+        else:
+            return loop.run_until_complete(coro)
+    except RuntimeError:
+        # No event loop exists, create a new one
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
 
 
 # ─────────────── Check and send reminders ─────────────── #
 @shared_task(bind=True)
 def check_and_send_reminders(self):
-    run_async(_check_and_send_reminders())
+    return run_async(_check_and_send_reminders())
+
 
 async def _check_and_send_reminders():
+    # Create a fresh async session within the new event loop
     async with AsyncSessionLocal() as db:
         now = datetime.utcnow()
         service = NotificationService(db)
@@ -42,8 +60,12 @@ async def _check_and_send_reminders():
             )
         )
         bookings_24h = result_24h.scalars().all()
+        
         for booking in bookings_24h:
-            await service.send_booking_reminder(booking.id, 24)
+            try:
+                await service.send_booking_reminder(booking.id, 24)
+            except Exception as e:
+                print(f"Failed to send 24h reminder for booking {booking.id}: {e}")
 
         # 2h reminders
         reminder_time_2h = now + timedelta(hours=2)
@@ -57,25 +79,34 @@ async def _check_and_send_reminders():
             )
         )
         bookings_2h = result_2h.scalars().all()
+        
         for booking in bookings_2h:
-            await service.send_booking_reminder(booking.id, 2)
+            try:
+                await service.send_booking_reminder(booking.id, 2)
+            except Exception as e:
+                print(f"Failed to send 2h reminder for booking {booking.id}: {e}")
 
 
 # ─────────────── Send single reminder ─────────────── #
 @shared_task(bind=True)
 def send_reminder(self, booking_id: str, hours_before: int):
-    run_async(_send_reminder(booking_id, hours_before))
+    return run_async(_send_reminder(booking_id, hours_before))
+
 
 async def _send_reminder(booking_id: str, hours_before: int):
     async with AsyncSessionLocal() as db:
         service = NotificationService(db)
-        await service.send_booking_reminder(booking_id, hours_before)
+        try:
+            await service.send_booking_reminder(booking_id, hours_before)
+        except Exception as e:
+            print(f"Failed to send {hours_before}h reminder for booking {booking_id}: {e}")
 
 
 # ─────────────── Cleanup old bookings ─────────────── #
 @shared_task(bind=True)
 def cleanup_old_bookings(self):
-    run_async(_cleanup_old_bookings())
+    return run_async(_cleanup_old_bookings())
+
 
 async def _cleanup_old_bookings():
     async with AsyncSessionLocal() as db:
@@ -89,7 +120,43 @@ async def _cleanup_old_bookings():
             )
         )
         bookings = result.scalars().all()
+        
+        updated_count = 0
         for booking in bookings:
-            booking.status = BookingStatus.CANCELLED
-            booking.cancellation_reason = "Not confirmed within 24 hours"
-        await db.commit()
+            try:
+                booking.status = BookingStatus.CANCELLED
+                booking.cancellation_reason = "Not confirmed within 24 hours"
+                updated_count += 1
+            except Exception as e:
+                print(f"Failed to cancel booking {booking.id}: {e}")
+        
+        if updated_count > 0:
+            await db.commit()
+            print(f"Cancelled {updated_count} old bookings")
+
+
+# Alternative approach using asyncio.run (Python 3.7+)
+def run_async_alternative(coro):
+    """
+    Alternative helper using asyncio.run (cleaner but requires Python 3.7+)
+    """
+    return asyncio.run(coro)
+
+
+# ─────────────── Alternative task implementations ─────────────── #
+@shared_task(bind=True, name="check_and_send_reminders_v2")
+def check_and_send_reminders_v2(self):
+    """Alternative implementation using asyncio.run"""
+    return asyncio.run(_check_and_send_reminders())
+
+
+@shared_task(bind=True, name="send_reminder_v2")
+def send_reminder_v2(self, booking_id: str, hours_before: int):
+    """Alternative implementation using asyncio.run"""
+    return asyncio.run(_send_reminder(booking_id, hours_before))
+
+
+@shared_task(bind=True, name="cleanup_old_bookings_v2")
+def cleanup_old_bookings_v2(self):
+    """Alternative implementation using asyncio.run"""
+    return asyncio.run(_cleanup_old_bookings())
