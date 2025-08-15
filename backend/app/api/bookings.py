@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, case
 from typing import List, Optional
 from datetime import datetime, date
 from uuid import UUID
@@ -9,8 +10,10 @@ from app.schemas.booking import BookingCreate, BookingUpdate, BookingResponse
 from app.services.booking import BookingService
 from app.services.notification import NotificationService
 from app.utils.security import get_current_user
-from app.models.booking import BookingStatus
-from app.models.user import User
+from app.models.booking import Booking, BookingStatus
+from app.models.user import User, UserRole
+from app.models.master import Master
+from app.utils.security import require_role
 
 router = APIRouter()
 
@@ -274,3 +277,48 @@ async def update_booking(
         )
     
     return booking
+
+# Добавьте этот endpoint в существующий файл
+
+@router.get("/master/stats")
+async def get_master_booking_stats(
+    current_user: User = Depends(require_role(UserRole.MASTER)),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get booking statistics for current master"""
+    # Найти профиль мастера
+    result = await db.execute(
+        select(Master).where(Master.user_id == current_user.id)
+    )
+    master = result.scalar_one_or_none()
+    
+    if not master:
+        return {
+            "total_bookings": 0,
+            "completed_bookings": 0,
+            "cancelled_bookings": 0,
+            "cancellation_rate": 0
+        }
+    
+    # Получить статистику записей
+    bookings_result = await db.execute(
+        select(
+            func.count(Booking.id).label('total'),
+            func.count(case((Booking.status == BookingStatus.COMPLETED, 1))).label('completed'),
+            func.count(case((Booking.status == BookingStatus.CANCELLED, 1))).label('cancelled')
+        )
+        .where(Booking.master_id == master.id)
+    )
+    
+    stats = bookings_result.first()
+    
+    cancellation_rate = 0
+    if stats.total > 0:
+        cancellation_rate = (stats.cancelled / stats.total) * 100
+    
+    return {
+        "total_bookings": stats.total,
+        "completed_bookings": stats.completed,
+        "cancelled_bookings": stats.cancelled,
+        "cancellation_rate": round(cancellation_rate, 2)
+    }

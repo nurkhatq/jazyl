@@ -30,6 +30,7 @@ export interface User {
   tenant_id: string
   is_active: boolean
   is_verified: boolean
+  created_at?: string
 }
 
 export interface Master {

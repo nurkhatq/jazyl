@@ -13,6 +13,42 @@ from app.models.user import User
 
 router = APIRouter()
 
+from pydantic import BaseModel
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+@router.post("/change-password")
+async def change_password(
+    password_data: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Change user password"""
+    auth_service = AuthService(db)
+    
+    # Verify current password
+    if not auth_service.verify_password(password_data.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect"
+        )
+    
+    # Validate new password
+    if len(password_data.new_password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 8 characters"
+        )
+    
+    # Update password
+    current_user.hashed_password = auth_service.get_password_hash(password_data.new_password)
+    await db.commit()
+    
+    return {"message": "Password changed successfully"}
+
+
 @router.post("/register", response_model=UserResponse)
 async def register(
     user_data: UserCreate,
