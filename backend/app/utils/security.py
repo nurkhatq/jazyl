@@ -46,6 +46,8 @@ async def get_current_user(
     return user
 
 def require_role(roles: Union[UserRole, List[UserRole]]):
+    """Fixed version that properly handles single role or list of roles"""
+    # Ensure roles is always a list
     if not isinstance(roles, list):
         roles = [roles]
     
@@ -55,63 +57,33 @@ def require_role(roles: Union[UserRole, List[UserRole]]):
         if current_user.role not in roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient permissions"
+                detail=f"Insufficient permissions. Required role(s): {[r.value for r in roles]}, your role: {current_user.role.value}"
             )
         return current_user
     
     return role_checker
 
-async def get_current_tenant(
-    request: Request,
-    current_user: User = Depends(get_current_user),
+# Alternative simple function for master endpoints
+async def get_current_master(
+    token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db)
-) -> UUID:
-    """Get current tenant from user or request headers"""
+) -> User:
+    """Get current user and verify they are a master"""
+    user = await get_current_user(token, db)
     
-    # First, try to get from authenticated user
-    if current_user and current_user.tenant_id:
-        return current_user.tenant_id
-    
-    # Then try from headers
-    tenant_id_header = request.headers.get("X-Tenant-ID")
-    if tenant_id_header:
-        try:
-            return UUID(tenant_id_header)
-        except ValueError:
-            pass
-    
-    # Try subdomain
-    subdomain = request.headers.get("X-Tenant-Subdomain")
-    if subdomain:
-        result = await db.execute(
-            select(Tenant).where(Tenant.subdomain == subdomain)
+    if user.role != UserRole.MASTER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access restricted to masters only"
         )
-        tenant = result.scalar_one_or_none()
-        if tenant:
-            return tenant.id
     
-    # Last resort - try to extract from host
-    host = request.headers.get("host", "")
-    if ".jazyl.tech" in host:
-        subdomain = host.split(".jazyl.tech")[0]
-        result = await db.execute(
-            select(Tenant).where(Tenant.subdomain == subdomain)
-        )
-        tenant = result.scalar_one_or_none()
-        if tenant:
-            return tenant.id
-    
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Tenant not specified"
-    )
+    return user
 
-# Добавьте эту функцию в существующий файл
 async def get_current_user_from_token(
     token: str,
     db: AsyncSession
 ) -> User:
-    """Получить пользователя из токена без использования Depends"""
+    """Get user from token without using Depends"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -139,6 +111,38 @@ async def get_current_user_from_token(
         raise credentials_exception
     
     return user
+
+async def get_current_tenant(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+) -> UUID:
+    # Get subdomain from request headers or host
+    subdomain = request.headers.get("X-Tenant-Subdomain")
+    
+    if not subdomain:
+        # Try to extract from host
+        host = request.headers.get("host", "")
+        if ".jazyl.tech" in host:
+            subdomain = host.split(".jazyl.tech")[0]
+    
+    if not subdomain:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant not specified"
+        )
+    
+    result = await db.execute(
+        select(Tenant).where(Tenant.subdomain == subdomain)
+    )
+    tenant = result.scalar_one_or_none()
+    
+    if not tenant or not tenant.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant not found"
+        )
+    
+    return tenant.id
 
 async def get_optional_current_tenant(
     request: Request,

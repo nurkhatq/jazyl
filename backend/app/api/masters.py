@@ -10,9 +10,11 @@ from app.database import get_db
 from app.models.user import User, UserRole
 from app.models.master import Master
 from app.models.booking import Booking, BookingStatus
+from app.models.client import Client
+from app.models.service import Service
 from app.schemas.master import MasterCreate, MasterUpdate, MasterResponse, MasterProfileResponse
 from app.services.master import MasterService
-from app.utils.security import get_current_user, require_role
+from app.utils.security import get_current_master, get_current_user, require_role
 from app.utils.email import EmailService
 
 router = APIRouter()
@@ -220,155 +222,181 @@ async def update_master_services(
 
 @router.get("/my-profile")
 async def get_my_profile(
-    current_user: User = Depends(require_role(UserRole.MASTER)),
+    current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
-) -> Dict[str, Any]:
-    """Get current master's profile - возвращаем как dict"""
-    result = await db.execute(
-        select(Master).where(Master.user_id == current_user.id)
-    )
-    master = result.scalar_one_or_none()
-    
-    if not master:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="Master profile not found"
+):
+    """Get current master's profile"""
+    try:
+        # Find master profile
+        result = await db.execute(
+            select(Master).where(Master.user_id == current_user.id)
         )
-    
-    # Возвращаем как словарь для избежания проблем с сериализацией
-    return {
-        "id": str(master.id),
-        "tenant_id": str(master.tenant_id),
-        "user_id": str(master.user_id),
-        "display_name": master.display_name,
-        "description": master.description,
-        "photo_url": master.photo_url,
-        "specialization": master.specialization or [],
-        "rating": float(master.rating or 0),
-        "reviews_count": int(master.reviews_count or 0),
-        "is_active": master.is_active,
-        "is_visible": master.is_visible,
-        "created_at": master.created_at.isoformat() if master.created_at else None,
-        "updated_at": master.updated_at.isoformat() if master.updated_at else None,
-    }
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            # Create basic master profile if doesn't exist
+            master = Master(
+                tenant_id=current_user.tenant_id,
+                user_id=current_user.id,
+                display_name=f"{current_user.first_name} {current_user.last_name or ''}".strip(),
+                description="",
+                specialization=[],
+                rating=0.0,
+                reviews_count=0,
+                is_active=True,
+                is_visible=True
+            )
+            db.add(master)
+            await db.commit()
+            await db.refresh(master)
+        
+        # Return as simple dict
+        return {
+            "id": str(master.id),
+            "tenant_id": str(master.tenant_id),
+            "user_id": str(master.user_id),
+            "display_name": master.display_name or "Unknown",
+            "description": master.description or "",
+            "photo_url": master.photo_url or None,
+            "specialization": master.specialization or [],
+            "rating": float(master.rating or 0),
+            "reviews_count": int(master.reviews_count or 0),
+            "is_active": bool(master.is_active),
+            "is_visible": bool(master.is_visible),
+            "created_at": master.created_at.isoformat() if master.created_at else datetime.utcnow().isoformat(),
+            "updated_at": master.updated_at.isoformat() if master.updated_at else datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        print(f"Error in get_my_profile: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting profile: {str(e)}"
+        )
 
 @router.get("/my-bookings/today")
 async def get_my_bookings_today(
-    current_user: User = Depends(require_role(UserRole.MASTER)),
+    current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
-) -> List[Dict[str, Any]]:
-    """Get master's bookings for today with client and service info"""
-    from app.models.client import Client
-    from app.models.service import Service
-    
-    result = await db.execute(
-        select(Master).where(Master.user_id == current_user.id)
-    )
-    master = result.scalar_one_or_none()
-    
-    if not master:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="Master profile not found"
+):
+    """Get master's bookings for today"""
+    try:
+        # Find master profile
+        result = await db.execute(
+            select(Master).where(Master.user_id == current_user.id)
         )
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            return []
 
-    today_start = datetime.combine(date.today(), datetime.min.time())
-    today_end = datetime.combine(date.today(), datetime.max.time())
+        today_start = datetime.combine(date.today(), datetime.min.time())
+        today_end = datetime.combine(date.today(), datetime.max.time())
 
-    # Загружаем записи с связанными данными
-    bookings_result = await db.execute(
-        select(Booking, Client, Service)
-        .join(Client, Booking.client_id == Client.id)
-        .join(Service, Booking.service_id == Service.id)
-        .where(
-            and_(
-                Booking.master_id == master.id, 
-                Booking.date >= today_start, 
-                Booking.date <= today_end
+        # Get bookings with client and service info
+        bookings_result = await db.execute(
+            select(Booking, Client, Service)
+            .outerjoin(Client, Booking.client_id == Client.id)
+            .outerjoin(Service, Booking.service_id == Service.id)
+            .where(
+                and_(
+                    Booking.master_id == master.id,
+                    Booking.date >= today_start,
+                    Booking.date <= today_end
+                )
             )
+            .order_by(Booking.date)
         )
-        .order_by(Booking.date)
-    )
-    
-    bookings_data = bookings_result.all()
+        
+        bookings_data = bookings_result.all()
 
-    return [
-        {
-            "id": str(booking.id),
-            "time": booking.date.strftime("%H:%M"),
-            "client_name": f"{client.first_name} {client.last_name or ''}".strip(),
-            "client_phone": client.phone,
-            "service_name": service.name,
-            "price": float(booking.price),
-            "status": booking.status.value
-        }
-        for booking, client, service in bookings_data
-    ]
+        return [
+            {
+                "id": str(booking.id),
+                "time": booking.date.strftime("%H:%M") if booking.date else "00:00",
+                "client_name": f"{client.first_name} {client.last_name or ''}".strip() if client else "Guest",
+                "client_phone": client.phone if client else "",
+                "service_name": service.name if service else "Service",
+                "price": float(booking.price or 0),
+                "status": booking.status.value if booking.status else "pending"
+            }
+            for booking, client, service in bookings_data
+        ]
+    except Exception as e:
+        print(f"Error in get_my_bookings_today: {str(e)}")
+        return []
 
 @router.get("/my-stats")
 async def get_my_stats(
-    current_user: User = Depends(require_role(UserRole.MASTER)),
+    current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
-) -> Dict[str, Any]:
+):
     """Get master's statistics"""
-    result = await db.execute(
-        select(Master).where(Master.user_id == current_user.id)
-    )
-    master = result.scalar_one_or_none()
-    
-    if not master:
+    try:
+        # Find master profile
+        result = await db.execute(
+            select(Master).where(Master.user_id == current_user.id)
+        )
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            return {
+                "weekBookings": 0,
+                "totalClients": 0,
+                "monthRevenue": 0
+            }
+        
+        # Get week bookings count
+        week_ago = datetime.now() - timedelta(days=7)
+        week_bookings_result = await db.execute(
+            select(func.count(Booking.id))
+            .where(
+                and_(
+                    Booking.master_id == master.id,
+                    Booking.date >= week_ago,
+                    Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.COMPLETED])
+                )
+            )
+        )
+        week_bookings = week_bookings_result.scalar() or 0
+        
+        # Get unique clients count
+        clients_result = await db.execute(
+            select(func.count(func.distinct(Booking.client_id)))
+            .where(
+                and_(
+                    Booking.master_id == master.id,
+                    Booking.status == BookingStatus.COMPLETED
+                )
+            )
+        )
+        total_clients = clients_result.scalar() or 0
+        
+        # Get month revenue
+        month_ago = datetime.now() - timedelta(days=30)
+        revenue_result = await db.execute(
+            select(func.coalesce(func.sum(Booking.price), 0))
+            .where(
+                and_(
+                    Booking.master_id == master.id,
+                    Booking.date >= month_ago,
+                    Booking.status == BookingStatus.COMPLETED
+                )
+            )
+        )
+        month_revenue = revenue_result.scalar() or 0
+        
         return {
-            "weekBookings": 0, 
-            "totalClients": 0, 
+            "weekBookings": int(week_bookings),
+            "totalClients": int(total_clients),
+            "monthRevenue": float(month_revenue)
+        }
+    except Exception as e:
+        print(f"Error in get_my_stats: {str(e)}")
+        return {
+            "weekBookings": 0,
+            "totalClients": 0,
             "monthRevenue": 0
         }
-    
-    # Получаем реальную статистику
-    # Записи за неделю
-    week_ago = datetime.now() - timedelta(days=7)
-    week_bookings_result = await db.execute(
-        select(func.count(Booking.id))
-        .where(
-            and_(
-                Booking.master_id == master.id,
-                Booking.date >= week_ago,
-                Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.COMPLETED])
-            )
-        )
-    )
-    week_bookings = week_bookings_result.scalar() or 0
-    
-    # Уникальные клиенты
-    clients_result = await db.execute(
-        select(func.count(func.distinct(Booking.client_id)))
-        .where(
-            and_(
-                Booking.master_id == master.id,
-                Booking.status == BookingStatus.COMPLETED
-            )
-        )
-    )
-    total_clients = clients_result.scalar() or 0
-    
-    # Доход за месяц
-    month_ago = datetime.now() - timedelta(days=30)
-    revenue_result = await db.execute(
-        select(func.sum(Booking.price))
-        .where(
-            and_(
-                Booking.master_id == master.id,
-                Booking.date >= month_ago,
-                Booking.status == BookingStatus.COMPLETED
-            )
-        )
-    )
-    month_revenue = revenue_result.scalar() or 0
-    
-    return {
-        "weekBookings": int(week_bookings),
-        "totalClients": int(total_clients),
-        "monthRevenue": float(month_revenue)
-    }
 
 # Добавим endpoint для получения полной информации мастера с расписанием
 @router.get("/{master_id}/full", response_model=MasterResponse)
@@ -389,3 +417,56 @@ async def get_master_full(
         )
     
     return master
+
+
+@router.get("/test-auth")
+async def test_auth(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Test endpoint to debug authentication"""
+    auth_header = request.headers.get("authorization")
+    
+    if not auth_header:
+        return {"error": "No authorization header"}
+    
+    if not auth_header.startswith("Bearer "):
+        return {"error": "Invalid authorization header format"}
+    
+    token = auth_header.split(" ")[1]
+    
+    try:
+        from jose import jwt
+        from app.config import settings
+        
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM]
+        )
+        
+        user_id = payload.get("sub")
+        role = payload.get("role")
+        
+        # Get user from database
+        from app.models.user import User
+        result = await db.execute(
+            select(User).where(User.id == UUID(user_id))
+        )
+        user = result.scalar_one_or_none()
+        
+        if user:
+            return {
+                "token_valid": True,
+                "user_id": str(user.id),
+                "email": user.email,
+                "role": user.role.value if user.role else None,
+                "role_from_token": role,
+                "is_master": user.role == UserRole.MASTER if user.role else False,
+                "tenant_id": str(user.tenant_id) if user.tenant_id else None
+            }
+        else:
+            return {"error": "User not found in database"}
+            
+    except Exception as e:
+        return {"error": f"Token decode error: {str(e)}"}
