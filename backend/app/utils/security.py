@@ -149,3 +149,23 @@ async def get_optional_current_tenant(
         return await get_current_tenant(request, None, db)
     except:
         return None
+    
+
+# Добавьте эту функцию если её ещё нет
+async def get_current_user_optional(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+) -> Optional[User]:
+    """
+    Возвращает текущего пользователя или None
+    """
+    auth_header = request.headers.get("authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None
+
+    token = auth_header.split(" ")[1]
+    try:
+        user = await get_current_user_from_token(token=token, db=db)
+        return user
+    except:
+        return None

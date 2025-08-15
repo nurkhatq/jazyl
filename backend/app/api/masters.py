@@ -1,16 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func, case
 from sqlalchemy.orm import selectinload
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.models.master import Master
-from app.models.booking import Booking
-from app.schemas.master import MasterCreate, MasterUpdate, MasterResponse
+from app.models.booking import Booking, BookingStatus
+from app.schemas.master import MasterCreate, MasterUpdate, MasterResponse, MasterProfileResponse
 from app.services.master import MasterService
 from app.utils.security import get_current_user, require_role
 from app.utils.email import EmailService
@@ -218,58 +218,174 @@ async def update_master_services(
     await service.update_master_services(master_id, service_ids)
     return {"message": "Services updated successfully"}
 
-# --- Current master endpoints ---
-@router.get("/my-profile", response_model=MasterResponse)
+@router.get("/my-profile")
 async def get_my_profile(
     current_user: User = Depends(require_role(UserRole.MASTER)),
     db: AsyncSession = Depends(get_db)
-):
-    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
+) -> Dict[str, Any]:
+    """Get current master's profile - возвращаем как dict"""
+    result = await db.execute(
+        select(Master).where(Master.user_id == current_user.id)
+    )
     master = result.scalar_one_or_none()
+    
     if not master:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Master profile not found")
-    return master
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Master profile not found"
+        )
+    
+    # Возвращаем как словарь для избежания проблем с сериализацией
+    return {
+        "id": str(master.id),
+        "tenant_id": str(master.tenant_id),
+        "user_id": str(master.user_id),
+        "display_name": master.display_name,
+        "description": master.description,
+        "photo_url": master.photo_url,
+        "specialization": master.specialization or [],
+        "rating": float(master.rating or 0),
+        "reviews_count": int(master.reviews_count or 0),
+        "is_active": master.is_active,
+        "is_visible": master.is_visible,
+        "created_at": master.created_at.isoformat() if master.created_at else None,
+        "updated_at": master.updated_at.isoformat() if master.updated_at else None,
+    }
 
 @router.get("/my-bookings/today")
 async def get_my_bookings_today(
     current_user: User = Depends(require_role(UserRole.MASTER)),
     db: AsyncSession = Depends(get_db)
-):
-    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
+) -> List[Dict[str, Any]]:
+    """Get master's bookings for today with client and service info"""
+    from app.models.client import Client
+    from app.models.service import Service
+    
+    result = await db.execute(
+        select(Master).where(Master.user_id == current_user.id)
+    )
     master = result.scalar_one_or_none()
+    
     if not master:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Master profile not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Master profile not found"
+        )
 
     today_start = datetime.combine(date.today(), datetime.min.time())
     today_end = datetime.combine(date.today(), datetime.max.time())
 
+    # Загружаем записи с связанными данными
     bookings_result = await db.execute(
-        select(Booking)
-        .where(and_(Booking.master_id == master.id, Booking.date >= today_start, Booking.date <= today_end))
+        select(Booking, Client, Service)
+        .join(Client, Booking.client_id == Client.id)
+        .join(Service, Booking.service_id == Service.id)
+        .where(
+            and_(
+                Booking.master_id == master.id, 
+                Booking.date >= today_start, 
+                Booking.date <= today_end
+            )
+        )
         .order_by(Booking.date)
     )
-    bookings = bookings_result.scalars().all()
+    
+    bookings_data = bookings_result.all()
 
     return [
         {
-            "id": str(b.id),
-            "time": b.date.strftime("%H:%M"),
-            "client_name": "Client",
-            "service_name": "Service",
-            "price": b.price,
-            "status": b.status.value
+            "id": str(booking.id),
+            "time": booking.date.strftime("%H:%M"),
+            "client_name": f"{client.first_name} {client.last_name or ''}".strip(),
+            "client_phone": client.phone,
+            "service_name": service.name,
+            "price": float(booking.price),
+            "status": booking.status.value
         }
-        for b in bookings
+        for booking, client, service in bookings_data
     ]
 
 @router.get("/my-stats")
 async def get_my_stats(
     current_user: User = Depends(require_role(UserRole.MASTER)),
     db: AsyncSession = Depends(get_db)
-):
-    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
+) -> Dict[str, Any]:
+    """Get master's statistics"""
+    result = await db.execute(
+        select(Master).where(Master.user_id == current_user.id)
+    )
     master = result.scalar_one_or_none()
+    
     if not master:
-        return {"weekBookings": 0, "totalClients": 0, "monthRevenue": 0}
+        return {
+            "weekBookings": 0, 
+            "totalClients": 0, 
+            "monthRevenue": 0
+        }
+    
+    # Получаем реальную статистику
+    # Записи за неделю
+    week_ago = datetime.now() - timedelta(days=7)
+    week_bookings_result = await db.execute(
+        select(func.count(Booking.id))
+        .where(
+            and_(
+                Booking.master_id == master.id,
+                Booking.date >= week_ago,
+                Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.COMPLETED])
+            )
+        )
+    )
+    week_bookings = week_bookings_result.scalar() or 0
+    
+    # Уникальные клиенты
+    clients_result = await db.execute(
+        select(func.count(func.distinct(Booking.client_id)))
+        .where(
+            and_(
+                Booking.master_id == master.id,
+                Booking.status == BookingStatus.COMPLETED
+            )
+        )
+    )
+    total_clients = clients_result.scalar() or 0
+    
+    # Доход за месяц
+    month_ago = datetime.now() - timedelta(days=30)
+    revenue_result = await db.execute(
+        select(func.sum(Booking.price))
+        .where(
+            and_(
+                Booking.master_id == master.id,
+                Booking.date >= month_ago,
+                Booking.status == BookingStatus.COMPLETED
+            )
+        )
+    )
+    month_revenue = revenue_result.scalar() or 0
+    
+    return {
+        "weekBookings": int(week_bookings),
+        "totalClients": int(total_clients),
+        "monthRevenue": float(month_revenue)
+    }
 
-    return {"weekBookings": 15, "totalClients": 45, "monthRevenue": 2500}
+# Добавим endpoint для получения полной информации мастера с расписанием
+@router.get("/{master_id}/full", response_model=MasterResponse)
+async def get_master_full(
+    master_id: UUID,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get master with schedules"""
+    stmt = select(Master).options(selectinload(Master.schedules)).where(Master.id == master_id)
+    result = await db.execute(stmt)
+    master = result.scalar_one_or_none()
+    
+    if not master:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Master not found"
+        )
+    
+    return master
