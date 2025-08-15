@@ -1,36 +1,42 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
-from typing import List, Optional
-from datetime import date, datetime
-from uuid import UUID
 from sqlalchemy.orm import selectinload
-from sqlalchemy import select
+from typing import List, Optional
+from uuid import UUID
+from datetime import date, datetime
+
 from app.database import get_db
 from app.schemas.master import MasterCreate, MasterUpdate, MasterResponse
 from app.services.master import MasterService
 from app.services.notification import NotificationService
-from app.utils.security import get_current_user, require_role, get_current_tenant
+from app.utils.security import get_current_user_from_token, require_role, get_current_tenant
 from app.models.user import UserRole, User
 from app.models.master import Master
-from app.models.booking import Booking, BookingStatus
+from app.models.booking import Booking
 from app.utils.email import EmailService
 
 router = APIRouter()
 
-async def get_current_user_optional(request: Request):
-    """
-    Возвращает текущего пользователя или None для поддомена (барбершопа).
-    """
+
+async def get_current_user_optional(request: Request, db: AsyncSession = Depends(get_db)) -> Optional[User]:
+    """Возвращает текущего пользователя или None для поддомена (барбершопа)."""
     subdomain = request.headers.get("x-subdomain")
     if subdomain:
-        return None  # Клиент поддомена — без авторизации
+        return None
+
     auth_header = request.headers.get("authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
-        return None  # нет токена — вернуть None
+        return None
 
     token = auth_header.split(" ")[1]
-    return await get_current_user(token)
+    return await get_current_user_from_token(token, db)
+
+
+def ensure_master_ownership(master: Master, current_user: User):
+    """Проверка, что мастер может редактировать только свои данные"""
+    if current_user.role == UserRole.MASTER and master.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
 
 
 @router.post("/", response_model=MasterResponse)
@@ -40,39 +46,24 @@ async def create_master(
     current_user: User = Depends(require_role(UserRole.OWNER)),
     db: AsyncSession = Depends(get_db)
 ):
-    """Create new master"""
     service = MasterService(db)
     email_service = EmailService()
-    
-    try:
-        master = await service.create_master(
-            current_user.tenant_id,
-            master_data
+
+    master = await service.create_master(current_user.tenant_id, master_data)
+
+    # Подгружаем schedules
+    result = await db.execute(select(Master).options(selectinload(Master.schedules)).where(Master.id == master.id))
+    master = result.scalar_one()
+
+    if 'user_email' in master_data:
+        background_tasks.add_task(
+            email_service.send_master_welcome_email,
+            master_data['user_email'],
+            master_data.get('user_first_name', ''),
+            'Jazyl Barbershop'
         )
 
-        # 🔹 Подгружаем schedules
-        stmt = (
-            select(Master)
-            .options(selectinload(Master.schedules))
-            .where(Master.id == master.id)
-        )
-        result = await db.execute(stmt)
-        master = result.scalar_one()
-
-        if 'user_email' in master_data:
-            background_tasks.add_task(
-                email_service.send_master_welcome_email,
-                master_data['user_email'],
-                master_data.get('user_first_name', ''),
-                'Jazyl Barbershop'
-            )
-        
-        return master
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+    return master
 
 
 @router.get("/", response_model=List[MasterResponse])
@@ -87,24 +78,22 @@ async def get_masters(
         stmt = stmt.where(Master.tenant_id == tenant_id)
     if is_active is not None:
         stmt = stmt.where(Master.is_active == is_active)
-    
     result = await db.execute(stmt)
     return result.scalars().all()
 
 
-# --- Получение конкретного мастера (публично) ---
 @router.get("/{master_id}", response_model=MasterResponse)
 async def get_master(
     master_id: UUID,
     current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
-    stmt = select(Master).options(selectinload(Master.schedules)).where(Master.id == master_id)
-    result = await db.execute(stmt)
+    result = await db.execute(select(Master).options(selectinload(Master.schedules)).where(Master.id == master_id))
     master = result.scalar_one_or_none()
     if not master:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Master not found")
     return master
+
 
 @router.put("/{master_id}", response_model=MasterResponse)
 async def update_master(
@@ -113,26 +102,14 @@ async def update_master(
     current_user: User = Depends(require_role([UserRole.OWNER, UserRole.MASTER])),
     db: AsyncSession = Depends(get_db)
 ):
-    """Update master"""
     service = MasterService(db)
-    
-    if current_user.role == UserRole.MASTER:
-        master = await service.get_master(master_id)
-        if master.user_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to update this master"
-            )
-    
-    master = await service.update_master(master_id, master_data)
-    
-    if not master:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Master not found"
-        )
-    
-    return master
+    master = await service.get_master(master_id)
+    ensure_master_ownership(master, current_user)
+    updated_master = await service.update_master(master_id, master_data)
+    if not updated_master:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Master not found")
+    return updated_master
+
 
 @router.delete("/{master_id}")
 async def delete_master(
@@ -140,12 +117,10 @@ async def delete_master(
     current_user: User = Depends(require_role(UserRole.OWNER)),
     db: AsyncSession = Depends(get_db)
 ):
-    """Delete master (soft delete)"""
     service = MasterService(db)
-    
     await service.delete_master(master_id)
-    
     return {"message": "Master deleted successfully"}
+
 
 @router.get("/{master_id}/schedule")
 async def get_master_schedule(
@@ -156,56 +131,36 @@ async def get_master_schedule(
     db: AsyncSession = Depends(get_db)
 ):
     service = MasterService(db)
-    schedule = await service.get_schedule(master_id, date_from, date_to)
-    return schedule
+    return await service.get_schedule(master_id, date_from, date_to)
+
 
 @router.put("/{master_id}/schedule")
 async def update_master_schedule(
     master_id: UUID,
     schedule_data: List[dict],
-    current_user = Depends(require_role([UserRole.OWNER, UserRole.MASTER])),
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.MASTER])),
     db: AsyncSession = Depends(get_db)
 ):
-    """Update master's schedule"""
     service = MasterService(db)
-    
-    # Masters can only update their own schedule
-    if current_user.role == UserRole.MASTER:
-        master = await service.get_master(master_id)
-        if master.user_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to update this schedule"
-            )
-    
+    master = await service.get_master(master_id)
+    ensure_master_ownership(master, current_user)
     await service.update_schedule(master_id, schedule_data)
-    
     return {"message": "Schedule updated successfully"}
+
 
 @router.post("/{master_id}/block-time")
 async def create_block_time(
     master_id: UUID,
     block_data: dict,
-    current_user = Depends(require_role([UserRole.OWNER, UserRole.MASTER])),
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.MASTER])),
     db: AsyncSession = Depends(get_db)
 ):
-    """Block time for master"""
     service = MasterService(db)
-    
-    # Masters can only block their own time
-    if current_user.role == UserRole.MASTER:
-        master = await service.get_master(master_id)
-        if master.user_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to block time for this master"
-            )
-    
-    block = await service.create_block_time(master_id, block_data)
-    
-    return block
+    master = await service.get_master(master_id)
+    ensure_master_ownership(master, current_user)
+    return await service.create_block_time(master_id, block_data)
 
-# --- Сервисы мастера (публично) ---
+
 @router.get("/{master_id}/services")
 async def get_master_services(
     master_id: UUID,
@@ -213,75 +168,57 @@ async def get_master_services(
     db: AsyncSession = Depends(get_db)
 ):
     service = MasterService(db)
-    services = await service.get_master_services(master_id)
-    return services
+    return await service.get_master_services(master_id)
+
 
 @router.put("/{master_id}/services")
 async def update_master_services(
     master_id: UUID,
     service_ids: List[UUID],
-    current_user = Depends(require_role([UserRole.OWNER, UserRole.MASTER])),
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.MASTER])),
     db: AsyncSession = Depends(get_db)
 ):
-    """Update services provided by master"""
     service = MasterService(db)
-    
+    master = await service.get_master(master_id)
+    ensure_master_ownership(master, current_user)
     await service.update_master_services(master_id, service_ids)
-    
     return {"message": "Services updated successfully"}
+
 
 @router.get("/my-profile", response_model=MasterResponse)
 async def get_my_profile(
     current_user: User = Depends(require_role(UserRole.MASTER)),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get current master's profile"""
-    result = await db.execute(
-        select(Master).where(Master.user_id == current_user.id)
-    )
+    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
     master = result.scalar_one_or_none()
-    
     if not master:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Master profile not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Master profile not found")
     return master
+
 
 @router.get("/my-bookings/today")
 async def get_my_bookings_today(
     current_user: User = Depends(require_role(UserRole.MASTER)),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get master's bookings for today"""
-    result = await db.execute(
-        select(Master).where(Master.user_id == current_user.id)
-    )
+    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
     master = result.scalar_one_or_none()
-    
     if not master:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Master profile not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Master profile not found")
+
     today_start = datetime.combine(date.today(), datetime.min.time())
     today_end = datetime.combine(date.today(), datetime.max.time())
-    
+
     bookings_result = await db.execute(
         select(Booking)
         .where(
-            and_(
-                Booking.master_id == master.id,
-                Booking.date >= today_start,
-                Booking.date <= today_end
-            )
+            and_(Booking.master_id == master.id, Booking.date >= today_start, Booking.date <= today_end)
         )
         .order_by(Booking.date)
     )
     bookings = bookings_result.scalars().all()
-    
+
     return [
         {
             "id": str(booking.id),
@@ -294,26 +231,16 @@ async def get_my_bookings_today(
         for booking in bookings
     ]
 
+
 @router.get("/my-stats")
 async def get_my_stats(
     current_user: User = Depends(require_role(UserRole.MASTER)),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get master's statistics"""
-    result = await db.execute(
-        select(Master).where(Master.user_id == current_user.id)
-    )
+    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
     master = result.scalar_one_or_none()
-    
     if not master:
-        return {
-            "weekBookings": 0,
-            "totalClients": 0,
-            "monthRevenue": 0
-        }
-    
-    return {
-        "weekBookings": 15,
-        "totalClients": 45,
-        "monthRevenue": 2500
-    }
+        return {"weekBookings": 0, "totalClients": 0, "monthRevenue": 0}
+
+    # Реализовать вычисление статистики при необходимости
+    return {"weekBookings": 15, "totalClients": 45, "monthRevenue": 2500}
