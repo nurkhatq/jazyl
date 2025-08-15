@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from typing import List, Optional
@@ -17,6 +17,16 @@ from app.models.booking import Booking, BookingStatus
 from app.utils.email import EmailService
 
 router = APIRouter()
+
+async def get_current_user_optional(request: Request):
+    """
+    Возвращает текущего пользователя или None для поддомена (барбершопа).
+    """
+    subdomain = request.headers.get("x-subdomain")
+    if subdomain:
+        return None  # Клиент поддомена — без авторизации
+    return await get_current_user(request)
+
 
 @router.post("/", response_model=MasterResponse)
 async def create_master(
@@ -63,46 +73,32 @@ async def create_master(
 @router.get("/", response_model=List[MasterResponse])
 async def get_masters(
     is_active: Optional[bool] = Query(True),
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get all masters for tenant"""
-    tenant_id = current_user.tenant_id
-    if not tenant_id:
-        return []
-
-    stmt = (
-        select(Master)
-        .options(selectinload(Master.schedules))  # подгружаем расписание
-        .where(Master.tenant_id == tenant_id)
-    )
+    tenant_id = getattr(current_user, "tenant_id", None)
+    stmt = select(Master).options(selectinload(Master.schedules))
+    if tenant_id:
+        stmt = stmt.where(Master.tenant_id == tenant_id)
     if is_active is not None:
         stmt = stmt.where(Master.is_active == is_active)
-
+    
     result = await db.execute(stmt)
     return result.scalars().all()
 
 
+# --- Получение конкретного мастера (публично) ---
 @router.get("/{master_id}", response_model=MasterResponse)
 async def get_master(
     master_id: UUID,
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get master by ID"""
-    stmt = (
-        select(Master)
-        .options(selectinload(Master.schedules))  # подгружаем расписание
-        .where(Master.id == master_id)
-    )
+    stmt = select(Master).options(selectinload(Master.schedules)).where(Master.id == master_id)
     result = await db.execute(stmt)
     master = result.scalar_one_or_none()
-
     if not master:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Master not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Master not found")
     return master
 
 @router.put("/{master_id}", response_model=MasterResponse)
@@ -151,17 +147,11 @@ async def get_master_schedule(
     master_id: UUID,
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get master's schedule"""
     service = MasterService(db)
-    
-    schedule = await service.get_schedule(
-        master_id,
-        date_from,
-        date_to
-    )
-    
+    schedule = await service.get_schedule(master_id, date_from, date_to)
     return schedule
 
 @router.put("/{master_id}/schedule")
@@ -210,16 +200,15 @@ async def create_block_time(
     
     return block
 
+# --- Сервисы мастера (публично) ---
 @router.get("/{master_id}/services")
 async def get_master_services(
     master_id: UUID,
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get services provided by master"""
     service = MasterService(db)
-    
     services = await service.get_master_services(master_id)
-    
     return services
 
 @router.put("/{master_id}/services")

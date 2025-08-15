@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from uuid import UUID
@@ -11,62 +11,58 @@ from app.models.user import UserRole, User
 
 router = APIRouter()
 
+# --- Вспомогательная функция ---
+async def get_current_user_optional(request: Request):
+    """
+    Возвращает текущего пользователя или None для поддомена (барбершопа)
+    """
+    subdomain = request.headers.get("x-subdomain")
+    if subdomain:
+        return None  # Клиент поддомена — без авторизации
+    return await get_current_user(request)
+
+# --- Создание сервиса (только для владельца) ---
 @router.post("/", response_model=ServiceResponse)
 async def create_service(
     service_data: ServiceCreate,
     current_user: User = Depends(require_role(UserRole.OWNER)),
     db: AsyncSession = Depends(get_db)
 ):
-    """Create new service"""
     service = ServiceService(db)
-    
-    new_service = await service.create_service(
-        current_user.tenant_id,
-        service_data
-    )
-    
+    new_service = await service.create_service(current_user.tenant_id, service_data)
     return new_service
 
+# --- Список сервисов (публично для поддоменов) ---
 @router.get("/", response_model=List[ServiceResponse])
 async def get_services(
     category_id: Optional[UUID] = Query(None),
     is_active: Optional[bool] = Query(True),
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get all services for tenant"""
     service = ServiceService(db)
-    
-    tenant_id = current_user.tenant_id
-    
+    tenant_id = getattr(current_user, "tenant_id", None)
     if not tenant_id:
-        return []
-    
-    services = await service.get_services(
-        tenant_id=tenant_id,
-        category_id=category_id,
-        is_active=is_active
-    )
-    
+        # Если поддомен, можно вернуть все сервисы без фильтрации по tenant
+        services = await service.get_services(category_id=category_id, is_active=is_active, tenant_id=None)
+    else:
+        services = await service.get_services(category_id=category_id, is_active=is_active, tenant_id=tenant_id)
     return services
 
+# --- Получение сервиса по ID (публично для поддоменов) ---
 @router.get("/{service_id}", response_model=ServiceResponse)
 async def get_service(
     service_id: UUID,
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get service by ID"""
     service = ServiceService(db)
     result = await service.get_service(service_id)
-    
     if not result:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Service not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
     return result
 
+# --- Обновление сервиса (только владелец) ---
 @router.put("/{service_id}", response_model=ServiceResponse)
 async def update_service(
     service_id: UUID,
@@ -74,56 +70,40 @@ async def update_service(
     current_user = Depends(require_role(UserRole.OWNER)),
     db: AsyncSession = Depends(get_db)
 ):
-    """Update service"""
     service = ServiceService(db)
-    
     updated_service = await service.update_service(service_id, service_data)
-    
     if not updated_service:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Service not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
     return updated_service
 
+# --- Удаление сервиса (только владелец) ---
 @router.delete("/{service_id}")
 async def delete_service(
     service_id: UUID,
     current_user = Depends(require_role(UserRole.OWNER)),
     db: AsyncSession = Depends(get_db)
 ):
-    """Delete service (soft delete)"""
     service = ServiceService(db)
-    
     await service.delete_service(service_id)
-    
     return {"message": "Service deleted successfully"}
 
+# --- Категории (только владелец для создания) ---
 @router.post("/categories")
 async def create_category(
     category_data: dict,
     current_user = Depends(require_role(UserRole.OWNER)),
     db: AsyncSession = Depends(get_db)
 ):
-    """Create service category"""
     service = ServiceService(db)
-    
-    category = await service.create_category(
-        current_user.tenant_id,
-        category_data
-    )
-    
+    category = await service.create_category(current_user.tenant_id, category_data)
     return category
 
+# --- Получение категорий (публично для поддоменов) ---
 @router.get("/categories")
 async def get_categories(
-    tenant_id: UUID = Depends(get_current_tenant),
+    tenant_id: Optional[UUID] = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get service categories"""
     service = ServiceService(db)
-    
     categories = await service.get_categories(tenant_id)
-    
     return categories
