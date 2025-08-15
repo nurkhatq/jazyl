@@ -19,7 +19,13 @@ async def get_current_user_optional(request: Request):
     subdomain = request.headers.get("x-subdomain")
     if subdomain:
         return None  # Клиент поддомена — без авторизации
-    return await get_current_user(request)
+
+    auth_header = request.headers.get("authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None  # нет токена — вернуть None
+
+    token = auth_header.split(" ")[1]
+    return await get_current_user(token)
 
 # --- Создание сервиса (только для владельца) ---
 @router.post("/", response_model=ServiceResponse)
