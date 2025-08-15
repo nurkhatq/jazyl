@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from datetime import datetime, date
@@ -6,31 +6,68 @@ from uuid import UUID
 
 from app.database import get_db
 from app.schemas.booking import BookingCreate, BookingUpdate, BookingResponse
-from app.models.user import User
 from app.services.booking import BookingService
 from app.services.notification import NotificationService
-from app.utils.security import get_current_user, get_current_tenant
+from app.utils.security import get_current_user
 from app.models.booking import BookingStatus
+from app.models.user import User
 
 router = APIRouter()
 
+# --- Get tenant ID from headers for public access ---
+async def get_tenant_id_from_header(request: Request) -> Optional[UUID]:
+    """Получает tenant_id из заголовка X-Tenant-ID"""
+    tenant_id_str = request.headers.get("X-Tenant-ID")
+    if tenant_id_str:
+        try:
+            return UUID(tenant_id_str)
+        except ValueError:
+            return None
+    return None
+
+# --- Optional current user for public endpoints ---
+async def get_current_user_optional(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+) -> Optional[User]:
+    """
+    Возвращает текущего пользователя или None для публичного доступа
+    """
+    auth_header = request.headers.get("authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None  # нет токена — публичный доступ
+
+    token = auth_header.split(" ")[1]
+    from app.utils.security import get_current_user_from_token
+    try:
+        user = await get_current_user_from_token(token=token, db=db)
+        return user
+    except:
+        return None
+
+# --- Public endpoint for creating bookings ---
 @router.post("/", response_model=BookingResponse)
 async def create_booking(
     booking_data: BookingCreate,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
+    request: Request,
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
-    """Create new booking"""
+    """Create new booking - публичный endpoint для клиентов"""
     service = BookingService(db)
     notification_service = NotificationService(db)
     
-    tenant_id = current_user.tenant_id
+    # Получаем tenant_id
+    if current_user:
+        tenant_id = current_user.tenant_id
+    else:
+        tenant_id = await get_tenant_id_from_header(request)
     
     if not tenant_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tenant not specified"
+            detail="Tenant ID is required"
         )
     
     # Check availability
@@ -56,6 +93,69 @@ async def create_booking(
     
     return booking
 
+# --- Public endpoint for checking availability ---
+@router.get("/availability/check")
+async def check_availability(
+    master_id: UUID,
+    date: datetime,
+    service_id: UUID,
+    request: Request,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db)
+):
+    """Check if time slot is available - публичный endpoint"""
+    service = BookingService(db)
+    
+    # Получаем tenant_id
+    if current_user:
+        tenant_id = current_user.tenant_id
+    else:
+        tenant_id = await get_tenant_id_from_header(request)
+    
+    if not tenant_id:
+        return {"available": False, "error": "Tenant ID is required"}
+    
+    available = await service.check_availability(
+        tenant_id,
+        master_id,
+        date,
+        service_id
+    )
+    
+    return {"available": available}
+
+# --- Public endpoint for getting available slots ---
+@router.get("/availability/slots")
+async def get_available_slots(
+    master_id: UUID = Query(...),
+    date: date = Query(...),
+    service_id: UUID = Query(...),
+    request: Request = None,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get available time slots for a day - публичный endpoint"""
+    service = BookingService(db)
+    
+    # Получаем tenant_id
+    if current_user:
+        tenant_id = current_user.tenant_id
+    else:
+        tenant_id = await get_tenant_id_from_header(request)
+    
+    if not tenant_id:
+        return {"slots": [], "error": "Tenant ID is required"}
+    
+    slots = await service.get_available_slots(
+        tenant_id,
+        master_id,
+        date,
+        service_id
+    )
+    
+    return {"slots": slots}
+
+# --- Protected endpoints (требуют авторизации) ---
 @router.get("/", response_model=List[BookingResponse])
 async def get_bookings(
     date_from: Optional[date] = Query(None),
@@ -65,16 +165,11 @@ async def get_bookings(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get bookings with filters"""
+    """Get bookings with filters - требует авторизации"""
     service = BookingService(db)
     
-    tenant_id = current_user.tenant_id
-    
-    if not tenant_id:
-        return []
-    
     bookings = await service.get_bookings(
-        tenant_id=tenant_id,
+        tenant_id=current_user.tenant_id,
         date_from=date_from,
         date_to=date_to,
         master_id=master_id,
@@ -100,14 +195,15 @@ async def get_booking(
     
     return booking
 
+# --- Public endpoints for confirmation/cancellation with tokens ---
 @router.post("/{booking_id}/confirm")
 async def confirm_booking(
     booking_id: UUID,
-    token: str,
-    background_tasks: BackgroundTasks,
+    token: str = Query(...),
+    background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """Confirm booking with token"""
+    """Confirm booking with token - публичный endpoint"""
     service = BookingService(db)
     notification_service = NotificationService(db)
     
@@ -120,30 +216,36 @@ async def confirm_booking(
         )
     
     # Send reminder in background
-    background_tasks.add_task(
-        notification_service.schedule_reminder,
-        booking.id
-    )
+    if background_tasks:
+        background_tasks.add_task(
+            notification_service.schedule_reminder,
+            booking.id
+        )
     
     return {"message": "Booking confirmed successfully"}
 
 @router.post("/{booking_id}/cancel")
 async def cancel_booking(
     booking_id: UUID,
-    token: Optional[str] = None,
+    token: Optional[str] = Query(None),
     reason: Optional[str] = None,
-    current_user = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
-    """Cancel booking"""
+    """Cancel booking - публичный с токеном или авторизованный"""
     service = BookingService(db)
     
-    # If token provided, validate it
+    # If token provided, validate it (public access)
     if token:
         booking = await service.cancel_booking_with_token(booking_id, token, reason)
-    else:
+    elif current_user:
         # User must be authenticated and authorized
         booking = await service.cancel_booking(booking_id, current_user.id, reason)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required or cancellation token must be provided"
+        )
     
     if not booking:
         raise HTTPException(
@@ -157,10 +259,10 @@ async def cancel_booking(
 async def update_booking(
     booking_id: UUID,
     booking_data: BookingUpdate,
-    current_user = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Update booking"""
+    """Update booking - требует авторизации"""
     service = BookingService(db)
     
     booking = await service.update_booking(booking_id, booking_data, current_user.id)
@@ -172,43 +274,3 @@ async def update_booking(
         )
     
     return booking
-
-@router.get("/availability/check")
-async def check_availability(
-    master_id: UUID,
-    date: datetime,
-    service_id: UUID,
-    tenant_id: UUID = Depends(get_current_tenant),
-    db: AsyncSession = Depends(get_db)
-):
-    """Check if time slot is available"""
-    service = BookingService(db)
-    
-    available = await service.check_availability(
-        tenant_id,
-        master_id,
-        date,
-        service_id
-    )
-    
-    return {"available": available}
-
-@router.get("/availability/slots")
-async def get_available_slots(
-    master_id: UUID,
-    date: date,
-    service_id: UUID,
-    tenant_id: UUID = Depends(get_current_tenant),
-    db: AsyncSession = Depends(get_db)
-):
-    """Get available time slots for a day"""
-    service = BookingService(db)
-    
-    slots = await service.get_available_slots(
-        tenant_id,
-        master_id,
-        date,
-        service_id
-    )
-    
-    return {"slots": slots}
