@@ -244,14 +244,25 @@ async def update_master(
     db: AsyncSession = Depends(get_db)
 ):
     service = MasterService(db)
+
+    # Проверка прав для роли MASTER
     if current_user.role == UserRole.MASTER:
         master = await service.get_master(master_id)
         if master.user_id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update this master")
+    
+    # Обновление мастера
     master = await service.update_master(master_id, master_data)
     if not master:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Master not found")
-    return master
+    
+    # Повторный select с загрузкой schedules
+    stmt = select(Master).options(selectinload(Master.schedules)).where(Master.id == master_id)
+    result = await db.execute(stmt)
+    master_with_schedules = result.scalar_one_or_none()
+    
+    return master_with_schedules
+
 
 @router.delete("/{master_id}")
 async def delete_master(
