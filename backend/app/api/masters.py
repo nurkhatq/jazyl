@@ -16,6 +16,15 @@ from app.utils.security import get_current_user, require_role
 from app.utils.email import EmailService
 
 router = APIRouter()
+async def get_tenant_id_from_header(request: Request) -> Optional[UUID]:
+    """Получает tenant_id из заголовка X-Tenant-ID"""
+    tenant_id_str = request.headers.get("X-Tenant-ID")
+    if tenant_id_str:
+        try:
+            return UUID(tenant_id_str)
+        except ValueError:
+            return None
+    return None
 
 # --- Optional current user for public endpoints ---
 async def get_current_user_optional(
@@ -23,23 +32,19 @@ async def get_current_user_optional(
     db: AsyncSession = Depends(get_db)
 ) -> Optional[User]:
     """
-    Возвращает текущего пользователя или None для поддомена или отсутствия токена.
+    Возвращает текущего пользователя или None для публичного доступа
     """
-    subdomain = request.headers.get("x-subdomain")
-    if subdomain:
-        return None  # клиент поддомена — без авторизации
-
     auth_header = request.headers.get("authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
-        return None  # нет токена — вернуть None
+        return None  # нет токена — публичный доступ
 
     token = auth_header.split(" ")[1]
-    from app.utils.security import get_current_user
+    from app.utils.security import get_current_user_from_token
     try:
-        user = await get_current_user(token=token, db=db)
+        user = await get_current_user_from_token(token=token, db=db)
         return user
     except:
-        return None  # при любой ошибке токена — просто None
+        return None
 
 
 # --- CRUD Masters ---
@@ -71,14 +76,34 @@ async def create_master(
 
 @router.get("/", response_model=List[MasterResponse])
 async def get_masters(
+    request: Request,
     is_active: Optional[bool] = Query(True),
     current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = getattr(current_user, "tenant_id", None)
+    """
+    Получить список мастеров
+    - Для авторизованных пользователей: мастера их tenant_id
+    - Для публичного доступа: используется X-Tenant-ID из заголовка
+    """
+    # Определяем tenant_id
+    tenant_id = None
+    
+    if current_user:
+        # Авторизованный пользователь - используем его tenant_id
+        tenant_id = current_user.tenant_id
+    else:
+        # Публичный доступ - берем из заголовка
+        tenant_id = await get_tenant_id_from_header(request)
+    
+    if not tenant_id:
+        # Если нет tenant_id, возвращаем пустой список
+        return []
+    
+    # Запрос мастеров для конкретного tenant
     stmt = select(Master).options(selectinload(Master.schedules))
-    if tenant_id:
-        stmt = stmt.where(Master.tenant_id == tenant_id)
+    stmt = stmt.where(Master.tenant_id == tenant_id)
+    
     if is_active is not None:
         stmt = stmt.where(Master.is_active == is_active)
     
@@ -97,6 +122,7 @@ async def get_master(
     if not master:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Master not found")
     return master
+
 
 @router.put("/{master_id}", response_model=MasterResponse)
 async def update_master(

@@ -11,29 +11,35 @@ from app.utils.security import get_current_user, require_role
 
 router = APIRouter()
 
+async def get_tenant_id_from_header(request: Request) -> Optional[UUID]:
+    """Получает tenant_id из заголовка X-Tenant-ID"""
+    tenant_id_str = request.headers.get("X-Tenant-ID")
+    if tenant_id_str:
+        try:
+            return UUID(tenant_id_str)
+        except ValueError:
+            return None
+    return None
+
 # --- Optional current user for public endpoints ---
 async def get_current_user_optional(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ) -> Optional[User]:
     """
-    Возвращает текущего пользователя или None для поддомена или отсутствия токена.
+    Возвращает текущего пользователя или None для публичного доступа
     """
-    subdomain = request.headers.get("x-subdomain")
-    if subdomain:
-        return None  # клиент поддомена — без авторизации
-
     auth_header = request.headers.get("authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
-        return None  # нет токена — вернуть None
+        return None  # нет токена — публичный доступ
 
     token = auth_header.split(" ")[1]
-    from app.utils.security import get_current_user
+    from app.utils.security import get_current_user_from_token
     try:
-        user = await get_current_user(token=token, db=db)
+        user = await get_current_user_from_token(token=token, db=db)
         return user
     except:
-        return None  # при любой ошибке токена — просто None
+        return None
 
 
 # --- CRUD Services ---
@@ -49,14 +55,39 @@ async def create_service(
 
 @router.get("/", response_model=List[ServiceResponse])
 async def get_services(
+    request: Request,
     category_id: Optional[UUID] = Query(None),
     is_active: Optional[bool] = Query(True),
     current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
+    """
+    Получить список услуг
+    - Для авторизованных пользователей: услуги их tenant_id
+    - Для публичного доступа: используется X-Tenant-ID из заголовка
+    """
     service = ServiceService(db)
-    tenant_id = getattr(current_user, "tenant_id", None)
-    services = await service.get_services(category_id=category_id, is_active=is_active, tenant_id=tenant_id)
+    
+    # Определяем tenant_id
+    tenant_id = None
+    
+    if current_user:
+        # Авторизованный пользователь - используем его tenant_id
+        tenant_id = current_user.tenant_id
+    else:
+        # Публичный доступ - берем из заголовка
+        tenant_id = await get_tenant_id_from_header(request)
+    
+    if not tenant_id:
+        # Если нет tenant_id, возвращаем пустой список
+        return []
+    
+    # Запрос услуг для конкретного tenant
+    services = await service.get_services(
+        tenant_id=tenant_id,
+        category_id=category_id, 
+        is_active=is_active
+    )
     return services
 
 @router.get("/{service_id}", response_model=ServiceResponse)

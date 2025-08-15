@@ -24,11 +24,18 @@ class ServiceService:
     
     async def get_services(
         self,
-        tenant_id: UUID,
+        tenant_id: Optional[UUID] = None,  # Сделать обязательным параметром
         category_id: Optional[UUID] = None,
         is_active: Optional[bool] = None
     ) -> List[Service]:
-        query = select(Service).where(Service.tenant_id == tenant_id)
+        query = select(Service)
+        
+        # ВАЖНО: всегда фильтруем по tenant_id
+        if tenant_id:
+            query = query.where(Service.tenant_id == tenant_id)
+        else:
+            # Если tenant_id не указан, возвращаем пустой список
+            return []
         
         if category_id:
             query = query.where(Service.category_id == category_id)
