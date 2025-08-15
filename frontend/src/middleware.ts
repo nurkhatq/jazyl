@@ -2,10 +2,10 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 export function middleware(request: NextRequest) {
-  const hostname = request.headers.get('host') || ''
+  const hostname = (request.headers.get('host') || '').split(':')[0];
   const pathname = request.nextUrl.pathname
   const subdomain = hostname.split('.')[0]
-
+  console.log('🟢 hostname:', hostname, 'subdomain:', subdomain, 'pathname:', pathname);
   // === Логика для поддоменов (барбершоп) ===
   if (subdomain !== 'jazyl' && subdomain !== 'www' && hostname.includes('.')) {
     // Это поддомен барбершопа
