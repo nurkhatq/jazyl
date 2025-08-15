@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { format } from 'date-fns'
 import { Calendar } from '@/components/ui/calendar'
 import { Button } from '@/components/ui/button'
@@ -10,24 +10,34 @@ import { Label } from '@/components/ui/label'
 import { useToast } from '@/hooks/use-toast'
 import { getMasters, getServices, getAvailableSlots, createBooking } from '@/lib/api'
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { Loader2 } from 'lucide-react'
+import { Loader2, CheckCircle } from 'lucide-react'
 
 interface BookingFlowProps {
   tenantId: string
+  preselectedMaster?: any
+  preselectedService?: any
 }
 
-export function BookingFlow({ tenantId }: BookingFlowProps) {
+export function BookingFlow({ tenantId, preselectedMaster, preselectedService }: BookingFlowProps) {
   const { toast } = useToast()
   const [step, setStep] = useState(1)
+  const [bookingComplete, setBookingComplete] = useState(false)
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date())
-  const [selectedMaster, setSelectedMaster] = useState<string | null>(null)
-  const [selectedService, setSelectedService] = useState<string | null>(null)
+  const [selectedMaster, setSelectedMaster] = useState<string | null>(preselectedMaster?.id || null)
+  const [selectedService, setSelectedService] = useState<string | null>(preselectedService?.id || null)
   const [selectedTime, setSelectedTime] = useState<string | null>(null)
   const [clientData, setClientData] = useState({
     name: '',
     email: '',
     phone: '',
   })
+
+  // Если есть предвыбранные элементы, переходим сразу к выбору времени
+  useEffect(() => {
+    if (preselectedMaster || preselectedService) {
+      setStep(2)
+    }
+  }, [preselectedMaster, preselectedService])
 
   const { data: masters } = useQuery({
     queryKey: ['masters', tenantId],
@@ -51,16 +61,11 @@ export function BookingFlow({ tenantId }: BookingFlowProps) {
   const bookingMutation = useMutation({
     mutationFn: (data: any) => createBooking(tenantId, data),
     onSuccess: () => {
+      setBookingComplete(true)
       toast({
         title: "Booking Created!",
         description: "Please check your email to confirm your booking.",
       })
-      // Reset form
-      setStep(1)
-      setSelectedMaster(null)
-      setSelectedService(null)
-      setSelectedTime(null)
-      setClientData({ name: '', email: '', phone: '' })
     },
     onError: () => {
       toast({
@@ -91,6 +96,36 @@ export function BookingFlow({ tenantId }: BookingFlowProps) {
     }
 
     bookingMutation.mutate(bookingData)
+  }
+
+  // Показываем успешное завершение
+  if (bookingComplete) {
+    return (
+      <Card className="max-w-2xl mx-auto">
+        <CardContent className="pt-6">
+          <div className="text-center py-8">
+            <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
+            <h3 className="text-2xl font-bold mb-2">Booking Successful!</h3>
+            <p className="text-gray-600 mb-6">
+              We've sent a confirmation email to {clientData.email}
+            </p>
+            <p className="text-sm text-gray-500 mb-6">
+              Please check your email and confirm your booking to complete the reservation.
+            </p>
+            <Button onClick={() => {
+              setBookingComplete(false)
+              setStep(1)
+              setSelectedMaster(null)
+              setSelectedService(null)
+              setSelectedTime(null)
+              setClientData({ name: '', email: '', phone: '' })
+            }}>
+              Book Another Appointment
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    )
   }
 
   return (
@@ -131,7 +166,11 @@ export function BookingFlow({ tenantId }: BookingFlowProps) {
               mode="single"
               selected={selectedDate}
               onSelect={setSelectedDate}
-              disabled={(date) => date < new Date() || date.getDay() === 0}
+              disabled={(date) => {
+                const today = new Date()
+                today.setHours(0, 0, 0, 0)
+                return date < today || date.getDay() === 0
+              }}
               className="rounded-md border"
             />
           </CardContent>
@@ -155,52 +194,71 @@ export function BookingFlow({ tenantId }: BookingFlowProps) {
           </CardHeader>
           <CardContent className="space-y-6">
             {/* Masters */}
-            <div>
-              <Label>Select Master</Label>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-2">
-                {masters?.map((master: any) => (
-                  <div
-                    key={master.id}
-                    onClick={() => setSelectedMaster(master.id)}
-                    className={`p-4 border rounded-lg cursor-pointer transition-colors
-                      ${selectedMaster === master.id ? 'border-primary bg-primary/10' : 'hover:border-primary/50'}`}
-                  >
-                    <div className="font-semibold">{master.display_name}</div>
-                    <div className="text-sm text-muted-foreground">
-                      {master.specialization?.join(', ')}
+            {!preselectedMaster && (
+              <div>
+                <Label>Select Master</Label>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-2">
+                  {masters?.filter((m: any) => m.is_active && m.is_visible).map((master: any) => (
+                    <div
+                      key={master.id}
+                      onClick={() => setSelectedMaster(master.id)}
+                      className={`p-4 border rounded-lg cursor-pointer transition-colors
+                        ${selectedMaster === master.id ? 'border-primary bg-primary/10' : 'hover:border-primary/50'}`}
+                    >
+                      <div className="font-semibold">{master.display_name}</div>
+                      <div className="text-sm text-muted-foreground">
+                        {master.specialization?.join(', ')}
+                      </div>
+                      {master.rating > 0 && (
+                        <div className="text-sm mt-1">⭐ {master.rating}</div>
+                      )}
                     </div>
-                    {master.rating > 0 && (
-                      <div className="text-sm mt-1">⭐ {master.rating}</div>
-                    )}
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Services */}
-            <div>
-              <Label>Select Service</Label>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-                {services?.map((service: any) => (
-                  <div
-                    key={service.id}
-                    onClick={() => setSelectedService(service.id)}
-                    className={`p-4 border rounded-lg cursor-pointer transition-colors
-                      ${selectedService === service.id ? 'border-primary bg-primary/10' : 'hover:border-primary/50'}`}
-                  >
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <div className="font-semibold">{service.name}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {service.duration} min
+            {!preselectedService && (
+              <div>
+                <Label>Select Service</Label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                  {services?.filter((s: any) => s.is_active).map((service: any) => (
+                    <div
+                      key={service.id}
+                      onClick={() => setSelectedService(service.id)}
+                      className={`p-4 border rounded-lg cursor-pointer transition-colors
+                        ${selectedService === service.id ? 'border-primary bg-primary/10' : 'hover:border-primary/50'}`}
+                    >
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div className="font-semibold">{service.name}</div>
+                          <div className="text-sm text-muted-foreground">
+                            {service.duration} min
+                          </div>
                         </div>
+                        <div className="font-semibold">${service.price}</div>
                       </div>
-                      <div className="font-semibold">${service.price}</div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* Show preselected items */}
+            {preselectedMaster && (
+              <div className="p-4 bg-primary/10 rounded-lg">
+                <Label>Selected Master</Label>
+                <p className="font-semibold">{preselectedMaster.display_name}</p>
+              </div>
+            )}
+            
+            {preselectedService && (
+              <div className="p-4 bg-primary/10 rounded-lg">
+                <Label>Selected Service</Label>
+                <p className="font-semibold">{preselectedService.name} - ${preselectedService.price}</p>
+              </div>
+            )}
           </CardContent>
           <div className="p-6 pt-0 flex justify-between">
             <Button variant="outline" onClick={() => setStep(1)}>
@@ -231,7 +289,7 @@ export function BookingFlow({ tenantId }: BookingFlowProps) {
                 <Loader2 className="h-8 w-8 animate-spin" />
               </div>
             ) : (
-              <div className="grid grid-cols-3 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
                 {availableSlots?.slots?.map((slot: string) => (
                   <Button
                     key={slot}

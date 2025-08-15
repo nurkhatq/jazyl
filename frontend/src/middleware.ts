@@ -2,23 +2,51 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 export function middleware(request: NextRequest) {
+  const hostname = request.headers.get('host') || ''
   const pathname = request.nextUrl.pathname
-  
-  // Пропускаем публичные страницы
+  const subdomain = hostname.split('.')[0]
+
+  // === Логика для поддоменов (барбершоп) ===
+  if (subdomain !== 'jazyl' && subdomain !== 'www' && hostname.includes('.')) {
+    // Это поддомен барбершопа
+    const requestHeaders = new Headers(request.headers)
+    requestHeaders.set('x-subdomain', subdomain)
+
+    // Если URL не начинается с /barbershop — переписываем
+    if (!pathname.startsWith('/barbershop')) {
+      return NextResponse.rewrite(
+        new URL(`/barbershop${pathname}`, request.url),
+        {
+          request: { headers: requestHeaders },
+        }
+      )
+    }
+
+    return NextResponse.next()
+  }
+
+  // === Логика для основного домена ===
+
+  // Перенаправляем корень на /platform
+  if (pathname === '/') {
+    return NextResponse.rewrite(new URL('/platform', request.url))
+  }
+
+  // Публичные страницы
   const publicPaths = ['/login', '/register', '/forgot-password', '/', '/platform']
   if (publicPaths.some(path => pathname.startsWith(path))) {
     return NextResponse.next()
   }
-  
-  // Получаем данные авторизации из cookies
+
+  // Авторизация
   const authUserCookie = request.cookies.get('auth-user')
-  
-  // Если нет авторизации, редирект на логин
   if (!authUserCookie) {
-    if (pathname.startsWith('/dashboard') || 
-        pathname.startsWith('/master') || 
-        pathname.startsWith('/profile') ||
-        pathname.startsWith('/admin')) {
+    if (
+      pathname.startsWith('/dashboard') ||
+      pathname.startsWith('/master') ||
+      pathname.startsWith('/profile') ||
+      pathname.startsWith('/admin')
+    ) {
       const url = new URL('/login', request.url)
       url.searchParams.set('from', pathname)
       return NextResponse.redirect(url)
@@ -30,36 +58,30 @@ export function middleware(request: NextRequest) {
     const authUser = JSON.parse(authUserCookie.value)
     const userRole = authUser.role
 
-    // Проверка доступа по ролям
+    // Проверка доступа
     if (pathname.startsWith('/dashboard')) {
       if (userRole !== 'owner' && userRole !== 'admin') {
-        // Редирект на правильный дашборд
         if (userRole === 'master') {
           return NextResponse.redirect(new URL('/master', request.url))
         }
         return NextResponse.redirect(new URL('/unauthorized', request.url))
       }
     }
-    
+
     if (pathname.startsWith('/master')) {
       if (userRole !== 'master') {
-        // Редирект на правильный дашборд
         if (userRole === 'owner' || userRole === 'admin') {
           return NextResponse.redirect(new URL('/dashboard', request.url))
         }
         return NextResponse.redirect(new URL('/unauthorized', request.url))
       }
     }
-    
-    if (pathname.startsWith('/admin')) {
-      if (userRole !== 'admin') {
-        return NextResponse.redirect(new URL('/unauthorized', request.url))
-      }
-    }
 
+    if (pathname.startsWith('/admin') && userRole !== 'admin') {
+      return NextResponse.redirect(new URL('/unauthorized', request.url))
+    }
   } catch (error) {
     console.error('Auth parsing error:', error)
-    // При ошибке парсинга - редирект на логин
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
@@ -68,13 +90,6 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - api (API routes)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     */
     '/((?!api|_next/static|_next/image|favicon.ico).*)',
-  ]
+  ],
 }
