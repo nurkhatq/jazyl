@@ -14,15 +14,27 @@ router = APIRouter()
 # --- Optional current user for public endpoints ---
 async def get_current_user_optional(
     request: Request,
-    current_user: Optional[User] = Depends(get_current_user)
+    db: AsyncSession = Depends(get_db)
 ) -> Optional[User]:
     """
-    Возвращает текущего пользователя или None для поддомена (барбершопа).
+    Возвращает текущего пользователя или None для поддомена или отсутствия токена.
     """
     subdomain = request.headers.get("x-subdomain")
     if subdomain:
-        return None  # Клиент поддомена — без авторизации
-    return current_user
+        return None  # клиент поддомена — без авторизации
+
+    auth_header = request.headers.get("authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None  # нет токена — вернуть None
+
+    token = auth_header.split(" ")[1]
+    from app.utils.security import get_current_user
+    try:
+        user = await get_current_user(token=token, db=db)
+        return user
+    except:
+        return None  # при любой ошибке токена — просто None
+
 
 # --- CRUD Services ---
 @router.post("/", response_model=ServiceResponse)
