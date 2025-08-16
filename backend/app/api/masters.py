@@ -84,44 +84,65 @@ async def get_my_profile(
         "updated_at": master.updated_at.isoformat() if master.updated_at else datetime.utcnow().isoformat(),
     }
 
+# Добавьте этот эндпоинт в файл backend/app/api/masters.py после существующего @router.get("/my-profile")
+
+from datetime import date, datetime, timedelta
+
 @router.get("/my-bookings/today")
 async def get_my_bookings_today(
     current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
+    """Get today's bookings for the current master"""
+    
+    # Получаем мастера по user_id
+    result = await db.execute(
+        select(Master).where(Master.user_id == current_user.id)
+    )
     master = result.scalar_one_or_none()
     
     if not master:
         return []
-
-    today_start = datetime.combine(date.today(), datetime.min.time())
-    today_end = datetime.combine(date.today(), datetime.max.time())
-
-    bookings_result = await db.execute(
+    
+    # Получаем сегодняшние записи
+    today = date.today()
+    start_of_day = datetime.combine(today, datetime.min.time())
+    end_of_day = datetime.combine(today, datetime.max.time())
+    
+    bookings_query = (
         select(Booking, Client, Service)
         .outerjoin(Client, Booking.client_id == Client.id)
         .outerjoin(Service, Booking.service_id == Service.id)
-        .where(and_(
-            Booking.master_id == master.id,
-            Booking.date >= today_start,
-            Booking.date <= today_end
-        ))
+        .where(
+            and_(
+                Booking.master_id == master.id,
+                Booking.date >= start_of_day,
+                Booking.date <= end_of_day,
+                Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.PENDING])
+            )
+        )
         .order_by(Booking.date)
     )
-
+    
+    bookings_result = await db.execute(bookings_query)
+    
+    # Форматируем результат
     return [
         {
             "id": str(booking.id),
-            "time": booking.date.strftime("%H:%M") if booking.date else "00:00",
-            "client_name": f"{client.first_name} {client.last_name or ''}".strip() if client else "Guest",
-            "client_phone": client.phone if client else "",
+            "date": booking.date.isoformat(),
+            "time": booking.date.strftime("%H:%M"),
+            "client_name": f"{client.first_name} {client.last_name or ''}".strip() if client else booking.client_name or "Guest",
+            "client_phone": client.phone if client else booking.client_phone or "",
             "service_name": service.name if service else "Service",
+            "duration": booking.duration or 30,
             "price": float(booking.price or 0),
-            "status": booking.status.value if booking.status else "pending"
+            "status": booking.status.value if booking.status else "pending",
+            "notes": booking.notes
         }
         for booking, client, service in bookings_result.all()
     ]
+
 
 @router.get("/my-stats")
 async def get_my_stats(

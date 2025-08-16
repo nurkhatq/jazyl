@@ -1,0 +1,203 @@
+jazyl/
+├── backend/
+│   ├── alembic/
+│   │   ├── versions/
+│   │   │   └── 001_initial_migration.py (13KB)
+│   │   ├── env.py (2KB)
+│   │   └── script.py.mako (530B)
+│   ├── app/
+│   │   ├── api/
+│   │   │   ├── auth.py (7KB)
+│   │   │   ├── bookings.py (10KB)
+│   │   │   ├── clients.py (3KB)
+│   │   │   ├── dashboard.py (5KB)
+│   │   │   ├── init.py (24B)
+│   │   │   ├── masters.py (12KB)
+│   │   │   ├── services.py (5KB)
+│   │   │   └── tenants.py (3KB)
+│   │   ├── models/
+│   │   │   ├── __init__.py (700B)
+│   │   │   ├── block_time.py (945B)
+│   │   │   ├── booking.py (1KB)
+│   │   │   ├── client.py (1KB)
+│   │   │   ├── master.py (2KB)
+│   │   │   ├── notification.py (1KB)
+│   │   │   ├── service.py (1KB)
+│   │   │   ├── tenant.py (2KB)
+│   │   │   └── user.py (1KB)
+│   │   ├── schemas/
+│   │   │   ├── __init__.py (826B)
+│   │   │   ├── booking.py (1KB)
+│   │   │   ├── client.py (1KB)
+│   │   │   ├── master.py (2KB)
+│   │   │   ├── service.py (1009B)
+│   │   │   ├── tenant.py (1KB)
+│   │   │   └── user.py (1KB)
+│   │   ├── scripts/
+│   │   │   └── create_superuser.py (2KB)
+│   │   ├── services/
+│   │   │   ├── auth.py (6KB)
+│   │   │   ├── booking.py (12KB)
+│   │   │   ├── client.py (4KB)
+│   │   │   ├── dashboard.py (12KB)
+│   │   │   ├── master.py (8KB)
+│   │   │   ├── notification.py (6KB)
+│   │   │   ├── service.py (3KB)
+│   │   │   └── tenant.py (1KB)
+│   │   ├── templates/
+│   │   │   └── emails/
+│   │   │       ... (6 items)
+│   │   ├── utils/
+│   │   │   ├── __init__.py (39B)
+│   │   │   ├── email.py (9KB)
+│   │   │   ├── exceptions.py (866B)
+│   │   │   ├── logger.py (1KB)
+│   │   │   ├── middleware.py (1KB)
+│   │   │   ├── redis_client.py (174B)
+│   │   │   └── security.py (5KB)
+│   │   ├── __init__.py (56B)
+│   │   ├── celery_app.py (698B)
+│   │   ├── config.py (2KB)
+│   │   ├── database.py (1KB)
+│   │   ├── main.py (3KB)
+│   │   └── tasks.py (5KB)
+│   ├── alembic.ini (818B)
+│   ├── Dockerfile (541B)
+│   └── requirements.txt (494B)
+├── frontend/
+│   ├── public/
+│   ├── src/
+│   │   ├── app/
+│   │   │   ├── barbershop/
+│   │   │   │   └── page.tsx (11KB)
+│   │   │   ├── dashboard/
+│   │   │   │   ├── bookings/
+│   │   │   │   │   └── page.tsx (1KB)
+│   │   │   │   ├── clients/
+│   │   │   │   │   └── page.tsx (1KB)
+│   │   │   │   ├── masters/
+│   │   │   │   │   └── page.tsx (1KB)
+│   │   │   │   ├── services/
+│   │   │   │   │   └── page.tsx (1KB)
+│   │   │   │   ├── settings/
+│   │   │   │   │   └── page.tsx (1KB)
+│   │   │   │   └── page.tsx (1KB)
+│   │   │   ├── login/
+│   │   │   │   └── page.tsx (5KB)
+│   │   │   ├── master/
+│   │   │   │   ├── bookings/
+│   │   │   │   │   └── page.tsx (7KB)
+│   │   │   │   ├── clients/
+│   │   │   │   │   └── page.tsx (6KB)
+│   │   │   │   ├── profile/
+│   │   │   │   │   └── page.tsx (10KB)
+│   │   │   │   ├── schedule/
+│   │   │   │   │   └── page.tsx (11KB)
+│   │   │   │   ├── layout.tsx (4KB)
+│   │   │   │   └── page.tsx (5KB)
+│   │   │   ├── platform/
+│   │   │   │   └── page.tsx (17KB)
+│   │   │   ├── register/
+│   │   │   │   └── page.tsx (9KB)
+│   │   │   ├── set-password/
+│   │   │   │   ├── page.tsx (446B)
+│   │   │   │   └── set-password-client.tsx (7KB)
+│   │   │   ├── test-login/
+│   │   │   │   └── page.tsx (1KB)
+│   │   │   ├── unauthorized/
+│   │   │   │   └── page.tsx (1KB)
+│   │   │   ├── verify-email/
+│   │   │   │   └── [token]/
+│   │   │   │       ├── page.tsx (487B)
+│   │   │   │       └── verify-email-client.tsx (2KB)
+│   │   │   ├── globals.css (1KB)
+│   │   │   ├── layout.tsx (721B)
+│   │   │   └── page.tsx (5KB)
+│   │   ├── components/
+│   │   │   ├── booking/
+│   │   │   │   └── booking-flow.tsx (14KB)
+│   │   │   ├── dashboard/
+│   │   │   │   ├── settings/
+│   │   │   │   │   ├── booking-settings.tsx (5KB)
+│   │   │   │   │   ├── branding-settings.tsx (5KB)
+│   │   │   │   │   ├── general-settings.tsx (3KB)
+│   │   │   │   │   └── notification-settings.tsx (5KB)
+│   │   │   │   ├── booking-dialog.tsx (6KB)
+│   │   │   │   ├── bookings-table.tsx (3KB)
+│   │   │   │   ├── clients-table.tsx (2KB)
+│   │   │   │   ├── master-dialog.tsx (6KB)
+│   │   │   │   ├── masters-table.tsx (4KB)
+│   │   │   │   ├── popular-services.tsx (2KB)
+│   │   │   │   ├── revenue-chart.tsx (1KB)
+│   │   │   │   ├── service-dialog.tsx (4KB)
+│   │   │   │   ├── services-table.tsx (4KB)
+│   │   │   │   ├── stats-cards.tsx (2KB)
+│   │   │   │   └── today-bookings.tsx (3KB)
+│   │   │   ├── layouts/
+│   │   │   │   └── dashboard-layout.tsx (4KB)
+│   │   │   ├── masters/
+│   │   │   │   ├── change-password-dialog.tsx (4KB)
+│   │   │   │   └── masters-list.tsx (2KB)
+│   │   │   ├── services/
+│   │   │   │   └── services-list.tsx (3KB)
+│   │   │   ├── ui/
+│   │   │   │   ├── avatar.tsx (1KB)
+│   │   │   │   ├── badge.tsx (1KB)
+│   │   │   │   ├── button.tsx (1KB)
+│   │   │   │   ├── calendar.tsx (7KB)
+│   │   │   │   ├── card.tsx (1KB)
+│   │   │   │   ├── dialog.tsx (3KB)
+│   │   │   │   ├── dropdown-menu.tsx (7KB)
+│   │   │   │   ├── form.tsx (4KB)
+│   │   │   │   ├── input.tsx (768B)
+│   │   │   │   ├── label.tsx (724B)
+│   │   │   │   ├── progress.tsx (792B)
+│   │   │   │   ├── select.tsx (5KB)
+│   │   │   │   ├── separator.tsx (770B)
+│   │   │   │   ├── skeleton.tsx (266B)
+│   │   │   │   ├── switch.tsx (1KB)
+│   │   │   │   ├── table.tsx (2KB)
+│   │   │   │   ├── tabs.tsx (1KB)
+│   │   │   │   ├── textarea.tsx (649B)
+│   │   │   │   ├── toast.tsx (4KB)
+│   │   │   │   └── toaster.tsx (786B)
+│   │   │   └── providers.tsx (557B)
+│   │   ├── hooks/
+│   │   │   └── use-toast.ts (4KB)
+│   │   ├── lib/
+│   │   │   ├── api.ts (7KB)
+│   │   │   ├── store.ts (3KB)
+│   │   │   ├── store_backup.ts (3KB)
+│   │   │   └── utils.ts (166B)
+│   │   ├── types/
+│   │   │   └── index.ts (2KB)
+│   │   └── middleware.ts (3KB)
+│   ├── components.json (448B)
+│   ├── Dockerfile (1KB)
+│   ├── next-env.d.ts (206B)
+│   ├── next.config.js (1KB)
+│   ├── package-lock.json (262KB)
+│   ├── package.json (1KB)
+│   ├── postcss.config.js (88B)
+│   ├── tailwind.config.js (2KB)
+│   └── tsconfig.json (624B)
+├── nginx/
+│   ├── conf.d/
+│   │   └── proxy.conf (381B)
+│   ├── Dockerfile (225B)
+│   └── nginx.conf (5KB)
+├── postgres/
+│   └── init.sql (1018B)
+├── .gitignore (755B)
+├── backup.sh (833B)
+├── deploy.sh (1KB)
+├── docker-compose.yml (2KB)
+├── generate-ssl.sh (775B)
+├── monitor.sh (1KB)
+├── README.md (771B)
+
+📝 **Notes for Claude:**
+- This structure respects .gitignore but shows important config files
+- Media/static folders shown as structure only
+- Key files (package.json, requirements.txt, etc.) always included
+- Use this to understand project architecture and file relationships

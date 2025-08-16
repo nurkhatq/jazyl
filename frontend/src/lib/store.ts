@@ -32,17 +32,26 @@ export const useAuthStore = create<AuthState>()(
       accessToken: null,
       refreshToken: null,
       setAuth: (accessToken, refreshToken, user) => {
-        // Сохраняем в cookies для middleware
-        Cookies.set('auth-data', JSON.stringify(user), { 
+        // ИСПРАВЛЕНО: Сохраняем в cookies с правильным названием для middleware
+        Cookies.set('auth-user', JSON.stringify(user), { 
           expires: 7,
-          sameSite: 'lax'
+          sameSite: 'lax',
+          secure: process.env.NODE_ENV === 'production'
+        })
+        
+        // Также сохраняем токен для API запросов
+        Cookies.set('access-token', accessToken, {
+          expires: 7,
+          sameSite: 'lax',
+          secure: process.env.NODE_ENV === 'production'
         })
         
         set({ accessToken, refreshToken, user })
       },
       clearAuth: () => {
-        // Удаляем cookies
-        Cookies.remove('auth-data')
+        // Удаляем все cookies
+        Cookies.remove('auth-user')
+        Cookies.remove('access-token')
         Cookies.remove('auth-storage')
         
         set({ user: null, accessToken: null, refreshToken: null })
@@ -54,14 +63,23 @@ export const useAuthStore = create<AuthState>()(
         return {
           getItem: (name) => {
             const value = localStorage.getItem(name)
-            // Дублируем в cookies для middleware
+            // Синхронизируем с cookies для middleware
             if (value) {
               try {
                 const parsed = JSON.parse(value)
                 if (parsed?.state?.user) {
-                  Cookies.set('auth-data', JSON.stringify(parsed.state.user), {
+                  // ИСПРАВЛЕНО: используем auth-user вместо auth-data
+                  Cookies.set('auth-user', JSON.stringify(parsed.state.user), {
                     expires: 7,
-                    sameSite: 'lax'
+                    sameSite: 'lax',
+                    secure: process.env.NODE_ENV === 'production'
+                  })
+                }
+                if (parsed?.state?.accessToken) {
+                  Cookies.set('access-token', parsed.state.accessToken, {
+                    expires: 7,
+                    sameSite: 'lax',
+                    secure: process.env.NODE_ENV === 'production'
                   })
                 }
               } catch (e) {
@@ -72,13 +90,22 @@ export const useAuthStore = create<AuthState>()(
           },
           setItem: (name, value) => {
             localStorage.setItem(name, value)
-            // Дублируем в cookies для middleware
+            // Синхронизируем с cookies для middleware
             try {
               const parsed = JSON.parse(value)
               if (parsed?.state?.user) {
-                Cookies.set('auth-data', JSON.stringify(parsed.state.user), {
+                // ИСПРАВЛЕНО: используем auth-user
+                Cookies.set('auth-user', JSON.stringify(parsed.state.user), {
                   expires: 7,
-                  sameSite: 'lax'
+                  sameSite: 'lax',
+                  secure: process.env.NODE_ENV === 'production'
+                })
+              }
+              if (parsed?.state?.accessToken) {
+                Cookies.set('access-token', parsed.state.accessToken, {
+                  expires: 7,
+                  sameSite: 'lax',
+                  secure: process.env.NODE_ENV === 'production'
                 })
               }
             } catch (e) {
@@ -87,10 +114,28 @@ export const useAuthStore = create<AuthState>()(
           },
           removeItem: (name) => {
             localStorage.removeItem(name)
-            Cookies.remove('auth-data')
+            Cookies.remove('auth-user')
+            Cookies.remove('access-token')
           }
         }
-      })
+      }),
+      onRehydrateStorage: () => (state) => {
+        // При загрузке из localStorage синхронизируем с cookies
+        if (state?.user) {
+          Cookies.set('auth-user', JSON.stringify(state.user), {
+            expires: 7,
+            sameSite: 'lax',
+            secure: process.env.NODE_ENV === 'production'
+          })
+        }
+        if (state?.accessToken) {
+          Cookies.set('access-token', state.accessToken, {
+            expires: 7,
+            sameSite: 'lax',
+            secure: process.env.NODE_ENV === 'production'
+          })
+        }
+      }
     }
   )
 )

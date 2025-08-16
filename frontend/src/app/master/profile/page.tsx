@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { useAuthStore } from '@/lib/store'
 import { useToast } from '@/hooks/use-toast'
 import api from '@/lib/api'
-import { User, Mail, Phone, Star, Calendar } from 'lucide-react'
+import { User, Mail, Phone, Star, Calendar, Lock } from 'lucide-react'
 
 // Диалог изменения пароля
 import { ChangePasswordDialog } from '@/components/masters/change-password-dialog'
@@ -47,7 +47,7 @@ export default function MasterProfilePage() {
         display_name: masterInfo.display_name || '',
         description: masterInfo.description || '',
         specialization: masterInfo.specialization?.join(', ') || '',
-        phone: masterInfo?.phone || ''
+        phone: user?.phone || ''
       })
     }
   }, [masterInfo, user])
@@ -80,7 +80,10 @@ export default function MasterProfilePage() {
     updateMutation.mutate({
       display_name: formData.display_name,
       description: formData.description,
-      specialization: formData.specialization.split(',').map(s => s.trim()).filter(s => s)
+      specialization: formData.specialization
+        .split(',')
+        .map(s => s.trim())
+        .filter(s => s.length > 0)
     })
   }
 
@@ -148,7 +151,7 @@ export default function MasterProfilePage() {
               </div>
               
               <Button type="submit" disabled={updateMutation.isPending}>
-                {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
+                {updateMutation.isPending ? 'Updating...' : 'Update Profile'}
               </Button>
             </form>
           </CardContent>
@@ -162,83 +165,71 @@ export default function MasterProfilePage() {
               Your account details
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <User className="h-5 w-5 text-muted-foreground" />
-                <div>
-                  <p className="text-sm text-muted-foreground">Full Name</p>
-                  <p className="font-medium">{user?.first_name} {user?.last_name}</p>
-                </div>
+          <CardContent className="space-y-4">
+            <div className="space-y-3">
+              <div className="flex items-center space-x-2">
+                <Mail className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm">{user?.email}</span>
               </div>
               
-              <div className="flex items-center gap-3">
-                <Mail className="h-5 w-5 text-muted-foreground" />
-                <div>
-                  <p className="text-sm text-muted-foreground">Email</p>
-                  <p className="font-medium">{user?.email}</p>
-                </div>
+              <div className="flex items-center space-x-2">
+                <User className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm">{user?.first_name} {user?.last_name}</span>
               </div>
               
-              <div className="flex items-center gap-3">
-                <Phone className="h-5 w-5 text-muted-foreground" />
-                <div>
-                  <p className="text-sm text-muted-foreground">Phone</p>
-                  <p className="font-medium">{masterInfo?.phone || 'Not set'}</p>
-                </div>
+              <div className="flex items-center space-x-2">
+                <Calendar className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm">
+                  Member since {new Date(user?.created_at || '').toLocaleDateString()}
+                </span>
               </div>
               
-              <div className="flex items-center gap-3">
-                <Calendar className="h-5 w-5 text-muted-foreground" />
-                <div>
-                  <p className="text-sm text-muted-foreground">Member Since</p>
-                  <p className="font-medium">
-                    {masterInfo?.created_at ? new Date(masterInfo.created_at).toLocaleDateString() : 'Unknown'}
-                  </p>
-                </div>
+              <div className="flex items-center space-x-2">
+                <Star className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm">
+                  Rating: {masterInfo?.rating ? masterInfo.rating.toFixed(1) : 'N/A'} ({masterInfo?.reviews_count || 0} reviews)
+                </span>
               </div>
+            </div>
+            
+            <div className="pt-4 border-t">
+              <Button 
+                variant="outline" 
+                className="w-full"
+                onClick={() => setPasswordDialogOpen(true)}
+              >
+                <Lock className="h-4 w-4 mr-2" />
+                Change Password
+              </Button>
             </div>
           </CardContent>
         </Card>
 
-        {/* Performance Stats */}
+        {/* Statistics */}
         <Card>
           <CardHeader>
-            <CardTitle>Performance</CardTitle>
+            <CardTitle>Statistics</CardTitle>
             <CardDescription>
-              Your work statistics
+              Your performance metrics
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Star className="h-5 w-5 text-yellow-500" />
-                  <span className="text-sm text-muted-foreground">Rating</span>
-                </div>
-                <div className="text-right">
-                  <p className="font-semibold text-lg">
-                    {masterInfo?.rating > 0 ? masterInfo.rating.toFixed(1) : 'N/A'}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {masterInfo?.reviews_count || 0} reviews
-                  </p>
-                </div>
+            <div className="space-y-3">
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">Total Bookings</span>
+                <span className="font-medium">0</span>
               </div>
-              
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Total Bookings</span>
-                  <span className="font-medium">0</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Completed</span>
-                  <span className="font-medium">0</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Cancellation Rate</span>
-                  <span className="font-medium">0%</span>
-                </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">Completed</span>
+                <span className="font-medium">0</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">This Month</span>
+                <span className="font-medium">0</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">Cancellation Rate</span>
+                <span className="font-medium">0%</span>
               </div>
             </div>
           </CardContent>
@@ -256,15 +247,15 @@ export default function MasterProfilePage() {
             <div className="space-y-3">
               {masterInfo?.specialization && masterInfo.specialization.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
-                  {masterInfo.specialization.map((spec: string) => (
-                    <Badge key={spec} variant="secondary">
+                  {masterInfo.specialization.map((spec: string, index: number) => (
+                    <Badge key={`${spec}-${index}`} variant="secondary">
                       {spec}
                     </Badge>
                   ))}
                 </div>
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  No specializations added yet
+                  No specializations added yet. Update your profile to add services.
                 </p>
               )}
             </div>
@@ -272,26 +263,10 @@ export default function MasterProfilePage() {
         </Card>
       </div>
 
-      {/* Change Password Section */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Security</CardTitle>
-          <CardDescription>
-            Manage your password and security settings
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button variant="outline" onClick={() => setPasswordDialogOpen(true)}>
-            Change Password
-          </Button>
-        </CardContent>
-      </Card>
-
       {/* Диалог изменения пароля */}
       <ChangePasswordDialog 
         open={passwordDialogOpen} 
-        onOpenChange={setPasswordDialogOpen} 
-        onSuccess={handlePasswordChangeSuccess} // уведомление при успешной смене пароля
+        onOpenChange={setPasswordDialogOpen}
       />
     </div>
   )
