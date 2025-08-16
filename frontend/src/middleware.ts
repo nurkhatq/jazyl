@@ -40,6 +40,7 @@ export function middleware(request: NextRequest) {
 
   // Авторизация
   const authUserCookie = request.cookies.get('auth-user')
+  console.log('🟢 authUserCookie:', authUserCookie?.value);
   if (!authUserCookie) {
     if (
       pathname.startsWith('/dashboard') ||
