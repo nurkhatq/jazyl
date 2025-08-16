@@ -55,7 +55,9 @@ export function middleware(request: NextRequest) {
   }
 
   try {
-    const authUser = JSON.parse(authUserCookie.value)
+    const raw = authUserCookie.value
+    const decoded = decodeURIComponent(raw)
+    const authUser = JSON.parse(decoded)
     const userRole = authUser.role
 
     // Проверка доступа
@@ -81,7 +83,7 @@ export function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL('/unauthorized', request.url))
     }
   } catch (error) {
-    console.error('Auth parsing error:', error)
+    console.error('Auth parsing error:', error, 'Cookie value:', authUserCookie?.value)
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
