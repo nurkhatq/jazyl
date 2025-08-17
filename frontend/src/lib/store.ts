@@ -9,12 +9,6 @@ interface User {
   last_name: string
   role: string
   tenant_id: string
-  phone?: string
-  is_active?: boolean
-  is_verified?: boolean
-  created_at?: string
-  updated_at?: string
-  last_login?: string
 }
 
 interface AuthState {
@@ -25,6 +19,49 @@ interface AuthState {
   clearAuth: () => void
 }
 
+// Custom storage для синхронизации с cookies
+const cookieStorage = {
+  getItem: (name: string) => {
+    // Читаем из localStorage для клиента
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(name)
+    }
+    return null
+  },
+  setItem: (name: string, value: string) => {
+    // Сохраняем в localStorage
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(name, value)
+      
+      // Также сохраняем критичные данные в cookies для middleware
+      try {
+        const data = JSON.parse(value)
+        if (data.state?.user) {
+          // Сохраняем минимальную информацию в cookie для проверки на сервере
+          Cookies.set('auth-user', JSON.stringify({
+            role: data.state.user.role,
+            id: data.state.user.id,
+            email: data.state.user.email
+          }), { 
+            expires: 7,
+            sameSite: 'lax',
+            secure: process.env.NODE_ENV === 'production'
+          })
+        }
+      } catch (e) {
+        console.error('Error setting auth cookie:', e)
+      }
+    }
+  },
+  removeItem: (name: string) => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(name)
+      // Удаляем cookie при logout
+      Cookies.remove('auth-user')
+    }
+  },
+}
+
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
@@ -32,65 +69,26 @@ export const useAuthStore = create<AuthState>()(
       accessToken: null,
       refreshToken: null,
       setAuth: (accessToken, refreshToken, user) => {
-        // Сохраняем в cookies для middleware
-        Cookies.set('auth-data', JSON.stringify(user), { 
-          expires: 7,
-          sameSite: 'lax'
+        // Сохраняем токен в cookie для API запросов
+        Cookies.set('access-token', accessToken, { 
+          expires: 1/48, // 30 минут
+          sameSite: 'lax',
+          secure: process.env.NODE_ENV === 'production'
         })
         
         set({ accessToken, refreshToken, user })
       },
       clearAuth: () => {
-        // Удаляем cookies
-        Cookies.remove('auth-data')
-        Cookies.remove('auth-storage')
+        // Удаляем все cookies
+        Cookies.remove('access-token')
+        Cookies.remove('auth-user')
         
         set({ user: null, accessToken: null, refreshToken: null })
       },
     }),
     {
       name: 'auth-storage',
-      storage: createJSONStorage(() => {
-        return {
-          getItem: (name) => {
-            const value = localStorage.getItem(name)
-            // Дублируем в cookies для middleware
-            if (value) {
-              try {
-                const parsed = JSON.parse(value)
-                if (parsed?.state?.user) {
-                  Cookies.set('auth-data', JSON.stringify(parsed.state.user), {
-                    expires: 7,
-                    sameSite: 'lax'
-                  })
-                }
-              } catch (e) {
-                console.error('Failed to sync auth to cookies:', e)
-              }
-            }
-            return value
-          },
-          setItem: (name, value) => {
-            localStorage.setItem(name, value)
-            // Дублируем в cookies для middleware
-            try {
-              const parsed = JSON.parse(value)
-              if (parsed?.state?.user) {
-                Cookies.set('auth-data', JSON.stringify(parsed.state.user), {
-                  expires: 7,
-                  sameSite: 'lax'
-                })
-              }
-            } catch (e) {
-              console.error('Failed to sync auth to cookies:', e)
-            }
-          },
-          removeItem: (name) => {
-            localStorage.removeItem(name)
-            Cookies.remove('auth-data')
-          }
-        }
-      })
+      storage: createJSONStorage(() => cookieStorage),
     }
   )
 )
