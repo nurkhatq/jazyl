@@ -46,11 +46,7 @@ class PermissionRequest(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # Связи
+    # Связи - используйте строковые ссылки!
     master = relationship("Master", back_populates="permission_requests")
     tenant = relationship("Tenant")
     reviewer = relationship("User", foreign_keys=[reviewed_by])
-
-# Добавляем в master.py связь
-# В класс Master добавить:
-# permission_requests = relationship("PermissionRequest", back_populates="master")

@@ -28,19 +28,21 @@ class Master(Base):
     is_active = Column(Boolean, default=True)
     is_visible = Column(Boolean, default=True)
     
-    # НОВЫЕ ПОЛЯ - Права доступа
+    # Права доступа
     can_edit_profile = Column(Boolean, default=True)
-    can_edit_schedule = Column(Boolean, default=False)  # По умолчанию не может
-    can_edit_services = Column(Boolean, default=False)  # По умолчанию не может
+    can_edit_schedule = Column(Boolean, default=False)
+    can_edit_services = Column(Boolean, default=False)
     can_manage_bookings = Column(Boolean, default=True)
     can_view_analytics = Column(Boolean, default=True)
     can_upload_photos = Column(Boolean, default=True)
-    permission_requests = relationship("PermissionRequest", back_populates="master")
+    
     # Временные метки
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Связи - используйте строковые ссылки!
+    permission_requests = relationship("PermissionRequest", back_populates="master", lazy="selectin")
     block_times = relationship("BlockTime", back_populates="master", cascade="all, delete-orphan")
-    # Связи
     tenant = relationship("Tenant", back_populates="masters")
     user = relationship("User", back_populates="master_profile")
     schedules = relationship("MasterSchedule", back_populates="master", cascade="all, delete-orphan")
