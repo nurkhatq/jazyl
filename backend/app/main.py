@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, status
 # from fastapi.middleware.cors import CORSMiddleware  # REMOVED - nginx handles CORS
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import logging
 from prometheus_client import make_asgi_app
@@ -15,7 +16,7 @@ from app.api import auth, tenants, bookings, masters, services, clients, dashboa
 from app.utils.logger import setup_logging
 from app.utils.middleware import TenantMiddleware, LoggingMiddleware
 from app.utils.exceptions import CustomException
-
+import os
 # Setup logging
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -100,6 +101,14 @@ app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"]
 metrics_app = make_asgi_app()
 app.mount("/metrics", metrics_app)
 
+
+uploads_dir = "uploads"
+if not os.path.exists(uploads_dir):
+    os.makedirs(uploads_dir)
+    os.makedirs(os.path.join(uploads_dir, "masters"))
+
+
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 @app.get("/")
 async def root():
     return {

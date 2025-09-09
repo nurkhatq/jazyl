@@ -1,33 +1,40 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useAuthStore } from '@/lib/store'
 import api from '@/lib/api'
-import { format, isToday, isTomorrow } from 'date-fns'
+import { format, isToday } from 'date-fns'
 import { 
   Calendar, 
   Clock, 
   Users, 
-  DollarSign, 
-  TrendingUp, 
-  Phone, 
-  MapPin,
-  Star,
+  DollarSign,
+  Phone,
   ChevronRight,
-  Activity
+  PlayCircle,
+  PauseCircle,
+  AlertCircle,
+  CheckCircle2
 } from 'lucide-react'
 import Link from 'next/link'
 
 export default function MasterDashboard() {
   const router = useRouter()
   const user = useAuthStore((state) => state.user)
+  const [currentTime, setCurrentTime] = useState(new Date())
 
-  // Базовая защита
+  // Обновляем время каждую минуту
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 60000)
+    return () => clearInterval(timer)
+  }, [])
+
+  // Защита роута
   useEffect(() => {
     if (!user) {
       router.push('/login')
@@ -69,7 +76,7 @@ export default function MasterDashboard() {
     enabled: !!user?.id && user?.role === 'master',
   })
 
-  // Получаем статистику мастера
+  // Получаем статистику
   const { data: stats } = useQuery({
     queryKey: ['master-stats'],
     queryFn: async () => {
@@ -79,354 +86,257 @@ export default function MasterDashboard() {
     enabled: !!user?.id && user?.role === 'master',
   })
 
-  // Получаем записи на завтра
-  const { data: tomorrowBookings } = useQuery({
-    queryKey: ['master-tomorrow-bookings'],
-    queryFn: async () => {
-      const tomorrow = new Date()
-      tomorrow.setDate(tomorrow.getDate() + 1)
-      const response = await api.get('/api/bookings', {
-        params: {
-          master_id: masterInfo?.id,
-          date_from: format(tomorrow, 'yyyy-MM-dd'),
-          date_to: format(tomorrow, 'yyyy-MM-dd')
-        }
-      })
-      return response.data
-    },
-    enabled: !!masterInfo?.id,
-  })
-
   if (!user || user.role !== 'master') {
     return null
   }
 
   const nextBooking = todayBookings?.find((booking: any) => {
     const bookingTime = new Date(`${format(new Date(), 'yyyy-MM-dd')}T${booking.time}`)
-    return bookingTime > new Date()
+    return bookingTime > currentTime
+  })
+
+  const currentBooking = todayBookings?.find((booking: any) => {
+    const bookingTime = new Date(`${format(new Date(), 'yyyy-MM-dd')}T${booking.time}`)
+    const endTime = new Date(bookingTime.getTime() + (booking.duration || 30) * 60000)
+    return bookingTime <= currentTime && currentTime <= endTime
   })
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'confirmed': return 'default'
-      case 'completed': return 'secondary' 
-      case 'cancelled': return 'destructive'
-      case 'pending': return 'outline'
-      default: return 'outline'
+      case 'confirmed': return 'bg-blue-500'
+      case 'completed': return 'bg-green-500'
+      case 'cancelled': return 'bg-red-500'
+      case 'pending': return 'bg-orange-500'
+      default: return 'bg-gray-500'
     }
   }
 
   return (
-    <div className="space-y-6">
-      {/* Welcome Section */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight">
-            Welcome back, {user?.first_name}!
-          </h2>
-          <p className="text-muted-foreground">
-            {format(new Date(), 'EEEE, MMMM d, yyyy')} • Here's your overview for today
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button asChild variant="outline">
-            <Link href="/master/schedule">
-              <Calendar className="mr-2 h-4 w-4" />
-              Schedule
-            </Link>
-          </Button>
-          <Button asChild>
-            <Link href="/master/bookings">
-              <Activity className="mr-2 h-4 w-4" />
-              All Bookings
-            </Link>
-          </Button>
+    <div className="min-h-screen bg-gray-50">
+      {/* Mobile Header */}
+      <div className="bg-white border-b px-4 py-3 sticky top-0 z-10">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-lg font-semibold text-gray-900">
+              Привет, {user.first_name}!
+            </h1>
+            <p className="text-sm text-gray-500">
+              {format(currentTime, 'EEEE, dd MMMM')}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className={`w-3 h-3 rounded-full ${masterInfo?.is_active ? 'bg-green-500' : 'bg-gray-400'}`} />
+            <span className="text-sm font-medium">
+              {masterInfo?.is_active ? 'Работаю' : 'Оффлайн'}
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Quick Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="p-4 space-y-4">
+        {/* Статус и быстрые действия */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Today's Bookings</CardTitle>
-            <Calendar className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{todayBookings?.length || 0}</div>
-            <p className="text-xs text-muted-foreground">
-              {todayBookings?.filter((b: any) => b.status === 'confirmed').length || 0} confirmed
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Next Appointment</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {nextBooking?.time || '--:--'}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {nextBooking?.client_name || 'No upcoming appointments'}
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">This Week</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats?.weekBookings || 0}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats?.totalClients || 0} total clients
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Monthly Revenue</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">${stats?.monthRevenue || 0}</div>
-            <p className="text-xs text-muted-foreground">
-              <TrendingUp className="inline h-3 w-3 mr-1" />
-              +12% from last month
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* Today's Schedule */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle>Today's Schedule</CardTitle>
-              <CardDescription>{format(new Date(), 'EEEE, MMMM d')}</CardDescription>
-            </div>
-            <Button asChild variant="ghost" size="sm">
-              <Link href="/master/schedule">
-                <ChevronRight className="h-4 w-4" />
-              </Link>
-            </Button>
-          </CardHeader>
-          <CardContent>
-            {todayBookings && todayBookings.length > 0 ? (
-              <div className="space-y-3">
-                {todayBookings.slice(0, 5).map((booking: any) => {
-                  const bookingTime = new Date(`${format(new Date(), 'yyyy-MM-dd')}T${booking.time}`)
-                  const isUpcoming = bookingTime > new Date()
-                  
-                  return (
-                    <div 
-                      key={booking.id} 
-                      className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
-                        isUpcoming ? 'bg-blue-50 border-blue-200' : 'bg-gray-50'
-                      }`}
-                    >
-                      <div className="flex items-center space-x-3">
-                        <div className={`text-sm font-medium ${isUpcoming ? 'text-blue-900' : 'text-gray-600'}`}>
-                          {booking.time}
-                        </div>
-                        <div>
-                          <p className="font-medium text-sm">{booking.client_name}</p>
-                          <p className="text-xs text-muted-foreground">{booking.service_name}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Badge variant={getStatusColor(booking.status)}>
-                          {booking.status}
-                        </Badge>
-                        <span className="text-sm font-medium">${booking.price}</span>
-                      </div>
-                    </div>
-                  )
-                })}
-                {todayBookings.length > 5 && (
-                  <Button asChild variant="ghost" className="w-full">
-                    <Link href="/master/bookings">
-                      View all {todayBookings.length} appointments
-                    </Link>
-                  </Button>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold">Статус работы</h2>
+              <Button 
+                size="sm" 
+                variant={masterInfo?.is_active ? "secondary" : "default"}
+                className="flex items-center gap-2"
+              >
+                {masterInfo?.is_active ? (
+                  <>
+                    <PauseCircle className="h-4 w-4" />
+                    Пауза
+                  </>
+                ) : (
+                  <>
+                    <PlayCircle className="h-4 w-4" />
+                    Начать
+                  </>
                 )}
+              </Button>
+            </div>
+            
+            {currentBooking ? (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                  <span className="text-sm font-medium text-blue-800">Сейчас с клиентом</span>
+                </div>
+                <p className="font-medium">{currentBooking.client_name}</p>
+                <p className="text-sm text-gray-600">{currentBooking.service_name}</p>
+                <div className="flex items-center gap-4 mt-2 text-sm">
+                  <span>Время: {currentBooking.time}</span>
+                  <span>Цена: ${currentBooking.price}</span>
+                </div>
+              </div>
+            ) : nextBooking ? (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Clock className="h-4 w-4 text-green-600" />
+                  <span className="text-sm font-medium text-green-800">Следующий клиент</span>
+                </div>
+                <p className="font-medium">{nextBooking.client_name}</p>
+                <p className="text-sm text-gray-600">{nextBooking.service_name}</p>
+                <div className="flex items-center gap-4 mt-2 text-sm">
+                  <span>Время: {nextBooking.time}</span>
+                  <span>Цена: ${nextBooking.price}</span>
+                </div>
               </div>
             ) : (
-              <div className="text-center py-8 text-muted-foreground">
-                <Calendar className="mx-auto h-12 w-12 mb-4 opacity-50" />
-                <p className="font-medium">No appointments today</p>
-                <p className="text-sm">Enjoy your free time!</p>
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
+                <span className="text-gray-500">Нет записей на сегодня</span>
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Tomorrow's Preview */}
+        {/* Быстрая статистика */}
+        <div className="grid grid-cols-2 gap-3">
+          <Card>
+            <CardContent className="p-4 text-center">
+              <div className="text-2xl font-bold text-blue-600">
+                {todayBookings?.length || 0}
+              </div>
+              <div className="text-sm text-gray-600">Записей сегодня</div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardContent className="p-4 text-center">
+              <div className="text-2xl font-bold text-green-600">
+                ${todayBookings?.reduce((sum: number, booking: any) => 
+                  booking.status !== 'cancelled' ? sum + (booking.price || 0) : sum, 0) || 0}
+              </div>
+              <div className="text-sm text-gray-600">Доход сегодня</div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardContent className="p-4 text-center">
+              <div className="text-2xl font-bold text-purple-600">
+                {stats?.weekBookings || 0}
+              </div>
+              <div className="text-sm text-gray-600">На этой неделе</div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardContent className="p-4 text-center">
+              <div className="text-2xl font-bold text-orange-600">
+                {stats?.totalClients || 0}
+              </div>
+              <div className="text-sm text-gray-600">Всего клиентов</div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Записи на сегодня */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle>Tomorrow's Preview</CardTitle>
-              <CardDescription>{format(new Date(Date.now() + 86400000), 'EEEE, MMMM d')}</CardDescription>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Расписание на сегодня</CardTitle>
+              <Button asChild variant="ghost" size="sm">
+                <Link href="/master/schedule">
+                  <ChevronRight className="h-4 w-4" />
+                </Link>
+              </Button>
             </div>
-            <Button asChild variant="ghost" size="sm">
-              <Link href="/master/schedule">
-                <ChevronRight className="h-4 w-4" />
-              </Link>
-            </Button>
           </CardHeader>
-          <CardContent>
-            {tomorrowBookings && tomorrowBookings.length > 0 ? (
-              <div className="space-y-3">
-                {tomorrowBookings.slice(0, 4).map((booking: any) => (
-                  <div key={booking.id} className="flex items-center justify-between p-3 rounded-lg bg-green-50 border border-green-200">
-                    <div className="flex items-center space-x-3">
-                      <div className="text-sm font-medium text-green-900">
-                        {format(new Date(booking.date), 'HH:mm')}
+          <CardContent className="space-y-3">
+            {todayBookings && todayBookings.length > 0 ? (
+              todayBookings.map((booking: any) => {
+                const bookingTime = new Date(`${format(new Date(), 'yyyy-MM-dd')}T${booking.time}`)
+                const isPast = bookingTime < currentTime
+                const isCurrent = currentBooking?.id === booking.id
+                
+                return (
+                  <div 
+                    key={booking.id} 
+                    className={`flex items-center gap-3 p-3 rounded-lg border ${
+                      isCurrent ? 'bg-blue-50 border-blue-200' :
+                      isPast ? 'bg-gray-50 border-gray-200' : 
+                      'bg-white border-gray-200'
+                    }`}
+                  >
+                    <div className="flex-shrink-0 text-center">
+                      <div className={`text-sm font-medium ${
+                        isCurrent ? 'text-blue-700' :
+                        isPast ? 'text-gray-500' : 'text-gray-900'
+                      }`}>
+                        {booking.time}
                       </div>
-                      <div>
-                        <p className="font-medium text-sm">{booking.client_name}</p>
-                        <p className="text-xs text-muted-foreground">{booking.service_name}</p>
-                      </div>
+                      <div className={`w-2 h-2 rounded-full mx-auto mt-1 ${getStatusColor(booking.status)}`} />
                     </div>
-                    <div className="flex items-center space-x-2">
-                      <Badge variant={getStatusColor(booking.status)}>
-                        {booking.status}
-                      </Badge>
-                      <span className="text-sm font-medium">${booking.price}</span>
+                    
+                    <div className="flex-1 min-w-0">
+                      <p className={`font-medium truncate ${
+                        isPast ? 'text-gray-600' : 'text-gray-900'
+                      }`}>
+                        {booking.client_name}
+                      </p>
+                      <p className="text-sm text-gray-500 truncate">
+                        {booking.service_name}
+                      </p>
+                    </div>
+                    
+                    <div className="flex-shrink-0 text-right">
+                      <div className="text-sm font-medium">${booking.price}</div>
+                      {booking.client_phone && (
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 mt-1">
+                          <Phone className="h-3 w-3" />
+                        </Button>
+                      )}
                     </div>
                   </div>
-                ))}
-                {tomorrowBookings.length > 4 && (
-                  <p className="text-center text-sm text-muted-foreground">
-                    +{tomorrowBookings.length - 4} more appointments
-                  </p>
-                )}
-              </div>
+                )
+              })
             ) : (
-              <div className="text-center py-8 text-muted-foreground">
-                <Clock className="mx-auto h-12 w-12 mb-4 opacity-50" />
-                <p className="font-medium">No appointments tomorrow</p>
-                <p className="text-sm">Free day ahead!</p>
+              <div className="text-center py-6 text-gray-500">
+                <Calendar className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p>Нет записей на сегодня</p>
               </div>
             )}
           </CardContent>
         </Card>
+
+        {/* Быстрые действия */}
+        <div className="grid grid-cols-2 gap-3">
+          <Button asChild variant="outline" className="h-16 flex-col gap-2">
+            <Link href="/master/schedule">
+              <Calendar className="h-5 w-5" />
+              <span className="text-sm">Расписание</span>
+            </Link>
+          </Button>
+          
+          <Button asChild variant="outline" className="h-16 flex-col gap-2">
+            <Link href="/master/bookings">
+              <Users className="h-5 w-5" />
+              <span className="text-sm">Все записи</span>
+            </Link>
+          </Button>
+        </div>
+
+        {/* Уведомления/Предупреждения */}
+        {!masterInfo?.is_active && (
+          <Card className="border-orange-200 bg-orange-50">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <AlertCircle className="h-5 w-5 text-orange-600" />
+                <div>
+                  <p className="text-sm font-medium text-orange-800">
+                    Вы оффлайн
+                  </p>
+                  <p className="text-xs text-orange-600">
+                    Включите работу, чтобы принимать новые записи
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
-
-      {/* Master Profile Info */}
-      {masterInfo && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle>Your Profile</CardTitle>
-              <CardDescription>Master information and stats</CardDescription>
-            </div>
-            <Button asChild variant="ghost" size="sm">
-              <Link href="/master/profile">
-                Edit Profile <ChevronRight className="ml-1 h-4 w-4" />
-              </Link>
-            </Button>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-6 md:grid-cols-3">
-              <div className="flex items-center space-x-4">
-                <div className="bg-blue-100 p-2 rounded-full">
-                  <Star className="h-4 w-4 text-blue-600" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Rating</p>
-                  <p className="text-lg font-bold">{masterInfo.rating?.toFixed(1) || '0.0'}</p>
-                  <p className="text-xs text-muted-foreground">{masterInfo.reviews_count || 0} reviews</p>
-                </div>
-              </div>
-              
-              <div className="flex items-center space-x-4">
-                <div className="bg-green-100 p-2 rounded-full">
-                  <Users className="h-4 w-4 text-green-600" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Total Clients</p>
-                  <p className="text-lg font-bold">{stats?.totalClients || 0}</p>
-                  <p className="text-xs text-muted-foreground">lifetime</p>
-                </div>
-              </div>
-              
-              <div className="flex items-center space-x-4">
-                <div className="bg-purple-100 p-2 rounded-full">
-                  <Activity className="h-4 w-4 text-purple-600" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Status</p>
-                  <p className="text-lg font-bold">
-                    {masterInfo.is_active ? (
-                      <Badge variant="default">Active</Badge>
-                    ) : (
-                      <Badge variant="secondary">Inactive</Badge>
-                    )}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {masterInfo.is_visible ? 'Visible to clients' : 'Hidden from clients'}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {masterInfo.specialization && masterInfo.specialization.length > 0 && (
-              <div className="mt-4">
-                <p className="text-sm font-medium text-muted-foreground mb-2">Specializations</p>
-                <div className="flex flex-wrap gap-2">
-                  {masterInfo.specialization.map((spec: string, index: number) => (
-                    <Badge key={index} variant="outline">{spec}</Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Quick Actions */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Quick Actions</CardTitle>
-          <CardDescription>Common tasks and shortcuts</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-3">
-            <Button asChild variant="outline" className="h-auto p-4">
-              <Link href="/master/schedule">
-                <div className="flex flex-col items-center space-y-2">
-                  <Calendar className="h-6 w-6" />
-                  <span>Manage Schedule</span>
-                </div>
-              </Link>
-            </Button>
-            
-            <Button asChild variant="outline" className="h-auto p-4">
-              <Link href="/master/bookings">
-                <div className="flex flex-col items-center space-y-2">
-                  <Users className="h-6 w-6" />
-                  <span>View All Bookings</span>
-                </div>
-              </Link>
-            </Button>
-            
-            <Button asChild variant="outline" className="h-auto p-4">
-              <Link href="/master/profile">
-                <div className="flex flex-col items-center space-y-2">
-                  <Star className="h-6 w-6" />
-                  <span>Update Profile</span>
-                </div>
-              </Link>
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   )
 }

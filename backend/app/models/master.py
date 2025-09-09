@@ -1,8 +1,8 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Integer, Float, JSON, Text
+from sqlalchemy import Column, String, Text, Boolean, Integer, Float, DateTime, ForeignKey, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from datetime import datetime
 import uuid
+from datetime import datetime
 
 from app.database import Base
 
@@ -10,30 +10,42 @@ class Master(Base):
     __tablename__ = "masters"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     
-    display_name = Column(String(255), nullable=False)
-    description = Column(Text)
-    photo_url = Column(String(500))
-    specialization = Column(JSON, default=list)  # List of specializations
+    # Основная информация
+    display_name = Column(String, nullable=True)
+    description = Column(Text, nullable=True)
+    photo_url = Column(String, nullable=True)
+    specialization = Column(JSON, default=list)
+    experience_years = Column(Integer, default=0)
     
+    # Рейтинг и статистика
     rating = Column(Float, default=0.0)
     reviews_count = Column(Integer, default=0)
     
+    # Статус
     is_active = Column(Boolean, default=True)
     is_visible = Column(Boolean, default=True)
     
+    # НОВЫЕ ПОЛЯ - Права доступа
+    can_edit_profile = Column(Boolean, default=True)
+    can_edit_schedule = Column(Boolean, default=False)  # По умолчанию не может
+    can_edit_services = Column(Boolean, default=False)  # По умолчанию не может
+    can_manage_bookings = Column(Boolean, default=True)
+    can_view_analytics = Column(Boolean, default=True)
+    can_upload_photos = Column(Boolean, default=True)
+    permission_requests = relationship("PermissionRequest", back_populates="master")
+    # Временные метки
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
+    block_times = relationship("BlockTime", back_populates="master", cascade="all, delete-orphan")
+    # Связи
     tenant = relationship("Tenant", back_populates="masters")
     user = relationship("User", back_populates="master_profile")
     schedules = relationship("MasterSchedule", back_populates="master", cascade="all, delete-orphan")
     services = relationship("MasterService", back_populates="master", cascade="all, delete-orphan")
     bookings = relationship("Booking", back_populates="master")
-    block_times = relationship("BlockTime", back_populates="master", cascade="all, delete-orphan")
 
 class MasterSchedule(Base):
     __tablename__ = "master_schedules"

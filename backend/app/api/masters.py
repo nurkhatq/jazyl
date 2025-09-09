@@ -1,21 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func
-from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from uuid import UUID
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.models.master import Master
-from app.models.booking import Booking, BookingStatus
-from app.models.client import Client
-from app.models.service import Service
-from app.schemas.master import MasterUpdate, MasterResponse
+from app.schemas.master import MasterUpdate, MasterResponse, MasterPermissionsUpdate
+from app.models.permission_request import PermissionRequestType
 from app.services.master import MasterService
+from app.services.file_upload import FileUploadService
+from app.services.permission_request import PermissionRequestService
 from app.utils.security import get_current_master, get_current_user, require_role
-from app.utils.email import EmailService
 
 router = APIRouter()
 
@@ -29,30 +27,18 @@ async def get_tenant_id_from_header(request: Request) -> Optional[UUID]:
             return None
     return None
 
-async def get_current_user_optional(
-    request: Request,
-    db: AsyncSession = Depends(get_db)
-) -> Optional[User]:
-    auth_header = request.headers.get("authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        return None
-    token = auth_header.split(" ")[1]
-    from app.utils.security import get_current_user_from_token
-    try:
-        return await get_current_user_from_token(token=token, db=db)
-    except:
-        return None
-
 # ---------------------- Endpoints for current master ----------------------
-@router.get("/my-profile")
+@router.get("/my-profile", response_model=MasterResponse)
 async def get_my_profile(
     current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
+    """Получить свой профиль мастера с правами доступа"""
     result = await db.execute(select(Master).where(Master.user_id == current_user.id))
     master = result.scalar_one_or_none()
     
     if not master:
+        # Создаем профиль мастера если его нет
         master = Master(
             tenant_id=current_user.tenant_id,
             user_id=current_user.id,
@@ -62,33 +48,98 @@ async def get_my_profile(
             rating=0.0,
             reviews_count=0,
             is_active=True,
-            is_visible=True
+            is_visible=True,
+            # Права по умолчанию для нового мастера
+            can_edit_profile=True,
+            can_edit_schedule=False,  # Требует разрешения менеджера
+            can_edit_services=False,  # Требует разрешения менеджера
+            can_manage_bookings=True,
+            can_view_analytics=True,
+            can_upload_photos=True
         )
         db.add(master)
         await db.commit()
         await db.refresh(master)
     
-    return {
-        "id": str(master.id),
-        "tenant_id": str(master.tenant_id),
-        "user_id": str(master.user_id),
-        "display_name": master.display_name or "Unknown",
-        "description": master.description or "",
-        "photo_url": master.photo_url or None,
-        "specialization": master.specialization or [],
-        "rating": float(master.rating or 0),
-        "reviews_count": int(master.reviews_count or 0),
-        "is_active": bool(master.is_active),
-        "is_visible": bool(master.is_visible),
-        "created_at": master.created_at.isoformat() if master.created_at else datetime.utcnow().isoformat(),
-        "updated_at": master.updated_at.isoformat() if master.updated_at else datetime.utcnow().isoformat(),
-    }
+    return master
+
+@router.put("/my-profile")
+async def update_my_profile(
+    profile_data: MasterUpdate,
+    current_user: User = Depends(get_current_master),
+    db: AsyncSession = Depends(get_db)
+):
+    """Обновить свой профиль"""
+    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
+    master = result.scalar_one_or_none()
+    
+    if not master:
+        raise HTTPException(status_code=404, detail="Master profile not found")
+    
+    # Проверяем права на редактирование профиля
+    if not master.can_edit_profile:
+        raise HTTPException(
+            status_code=403,
+            detail="Profile editing permission required. Contact your manager."
+        )
+    
+    # Обновляем только разрешенные поля
+    update_data = profile_data.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        if hasattr(master, key):
+            setattr(master, key, value)
+    
+    master.updated_at = datetime.utcnow()
+    await db.commit()
+    
+    return {"message": "Profile updated successfully"}
+
+@router.post("/upload-photo")
+async def upload_my_photo(
+    photo: UploadFile = File(...),
+    current_user: User = Depends(get_current_master),
+    db: AsyncSession = Depends(get_db)
+):
+    """Загрузить фото профиля"""
+    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
+    master = result.scalar_one_or_none()
+    
+    if not master:
+        raise HTTPException(status_code=404, detail="Master profile not found")
+    
+    if not master.can_upload_photos:
+        raise HTTPException(
+            status_code=403,
+            detail="Photo upload permission required. Contact your manager."
+        )
+    
+    # Загружаем фото
+    file_service = FileUploadService()
+    
+    try:
+        # Удаляем старое фото если есть
+        if master.photo_url:
+            await file_service.delete_file(master.photo_url)
+        
+        # Загружаем новое
+        photo_url = await file_service.upload_master_photo(str(master.id), photo)
+        
+        # Обновляем в базе
+        master.photo_url = photo_url
+        master.updated_at = datetime.utcnow()
+        await db.commit()
+        
+        return {"photo_url": photo_url, "message": "Photo uploaded successfully"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/my-bookings/today")
 async def get_my_bookings_today(
     current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
+    """Получить записи на сегодня"""
     result = await db.execute(select(Master).where(Master.user_id == current_user.id))
     master = result.scalar_one_or_none()
     
@@ -97,6 +148,10 @@ async def get_my_bookings_today(
 
     today_start = datetime.combine(date.today(), datetime.min.time())
     today_end = datetime.combine(date.today(), datetime.max.time())
+
+    from app.models.booking import Booking
+    from app.models.client import Client
+    from app.models.service import Service
 
     bookings_result = await db.execute(
         select(Booking, Client, Service)
@@ -117,6 +172,7 @@ async def get_my_bookings_today(
             "client_name": f"{client.first_name} {client.last_name or ''}".strip() if client else "Guest",
             "client_phone": client.phone if client else "",
             "service_name": service.name if service else "Service",
+            "duration": service.duration if service else 30,
             "price": float(booking.price or 0),
             "status": booking.status.value if booking.status else "pending"
         }
@@ -128,11 +184,21 @@ async def get_my_stats(
     current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
+    """Получить статистику мастера"""
     result = await db.execute(select(Master).where(Master.user_id == current_user.id))
     master = result.scalar_one_or_none()
     
     if not master:
         return {"weekBookings": 0, "totalClients": 0, "monthRevenue": 0}
+    
+    if not master.can_view_analytics:
+        raise HTTPException(
+            status_code=403,
+            detail="Analytics viewing permission required. Contact your manager."
+        )
+    
+    from app.models.booking import Booking, BookingStatus
+    from datetime import timedelta
     
     week_ago = datetime.now() - timedelta(days=7)
     week_bookings = await db.scalar(
@@ -168,174 +234,219 @@ async def get_my_stats(
         "monthRevenue": float(month_revenue)
     }
 
-# ---------------------- CRUD and other master_id routes ----------------------
-@router.post("/", response_model=MasterResponse)
-async def create_master(
-    master_data: dict,
-    background_tasks: BackgroundTasks,
-    current_user: User = Depends(require_role(UserRole.OWNER)),
+# ---------------------- Permission Requests ----------------------
+@router.post("/request-permission")
+async def request_permission(
+    permission_data: dict,
+    current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
-    service = MasterService(db)
-    email_service = EmailService()
-    master = await service.create_master(current_user.tenant_id, master_data)
+    """Запросить разрешение у менеджера"""
+    permission_type = permission_data.get("permission_type")
+    reason = permission_data.get("reason", "")
+    additional_info = permission_data.get("additional_info")
     
-    # Подгружаем расписание
-    stmt = select(Master).options(selectinload(Master.schedules)).where(Master.id == master.id)
-    result = await db.execute(stmt)
-    master = result.scalar_one()
-    
-    if 'user_email' in master_data:
-        background_tasks.add_task(
-            email_service.send_master_welcome_email,
-            master_data['user_email'],
-            master_data.get('user_first_name', ''),
-            'Jazyl Barbershop'
+    if not permission_type or not reason:
+        raise HTTPException(
+            status_code=400,
+            detail="permission_type and reason are required"
         )
-    return master
+    
+    try:
+        permission_enum = PermissionRequestType(permission_type)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid permission type: {permission_type}"
+        )
+    
+    # Получаем мастера
+    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
+    master = result.scalar_one_or_none()
+    
+    if not master:
+        raise HTTPException(status_code=404, detail="Master profile not found")
+    
+    # Создаем запрос
+    permission_service = PermissionRequestService(db)
+    request = await permission_service.create_request(
+        master_id=master.id,
+        tenant_id=current_user.tenant_id,
+        permission_type=permission_enum,
+        reason=reason,
+        additional_info=additional_info
+    )
+    
+    return {
+        "message": f"Permission request for '{permission_type}' has been sent to your manager",
+        "request_id": str(request.id),
+        "status": "pending"
+    }
 
-@router.get("/", response_model=List[MasterResponse])
-async def get_masters(
-    request: Request,
-    is_active: Optional[bool] = Query(True),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+@router.get("/my-permission-requests")
+async def get_my_permission_requests(
+    current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = current_user.tenant_id if current_user else await get_tenant_id_from_header(request)
-    if not tenant_id:
+    """Получить мои запросы разрешений"""
+    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
+    master = result.scalar_one_or_none()
+    
+    if not master:
         return []
-    stmt = select(Master).options(selectinload(Master.schedules)).where(Master.tenant_id == tenant_id)
-    if is_active is not None:
-        stmt = stmt.where(Master.is_active == is_active)
-    result = await db.execute(stmt)
-    return result.scalars().all()
+    
+    permission_service = PermissionRequestService(db)
+    requests = await permission_service.get_requests_for_master(master.id)
+    
+    return [
+        {
+            "id": str(req.id),
+            "permission_type": req.permission_type.value,
+            "reason": req.reason,
+            "status": req.status.value,
+            "created_at": req.created_at.isoformat(),
+            "reviewed_at": req.reviewed_at.isoformat() if req.reviewed_at else None,
+            "review_note": req.review_note
+        }
+        for req in requests
+    ]
 
-@router.get("/{master_id}/full", response_model=MasterResponse)
-async def get_master_full(
-    master_id: UUID,
-    current_user: Optional[User] = Depends(get_current_user_optional),
+# ---------------------- Schedule management ----------------------
+@router.get("/my-schedule")
+async def get_my_schedule(
+    current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
-    stmt = select(Master).options(selectinload(Master.schedules)).where(Master.id == master_id)
-    result = await db.execute(stmt)
+    """Получить свое расписание"""
+    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
     master = result.scalar_one_or_none()
-    if not master:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Master not found")
-    return master
-
-@router.get("/{master_id}", response_model=MasterResponse)
-async def get_master(
-    master_id: UUID,
-    current_user: Optional[User] = Depends(get_current_user_optional),
-    db: AsyncSession = Depends(get_db)
-):
-    stmt = select(Master).options(selectinload(Master.schedules)).where(Master.id == master_id)
-    result = await db.execute(stmt)
-    master = result.scalar_one_or_none()
-    if not master:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Master not found")
-    return master
-
-@router.put("/{master_id}", response_model=MasterResponse)
-async def update_master(
-    master_id: UUID,
-    master_data: MasterUpdate,
-    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.MASTER])),
-    db: AsyncSession = Depends(get_db)
-):
-    service = MasterService(db)
-
-    # Проверка прав для роли MASTER
-    if current_user.role == UserRole.MASTER:
-        master = await service.get_master(master_id)
-        if master.user_id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update this master")
     
-    # Обновление мастера
-    master = await service.update_master(master_id, master_data)
     if not master:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Master not found")
+        raise HTTPException(status_code=404, detail="Master profile not found")
     
-    # Повторный select с загрузкой schedules
-    stmt = select(Master).options(selectinload(Master.schedules)).where(Master.id == master_id)
-    result = await db.execute(stmt)
-    master_with_schedules = result.scalar_one_or_none()
-    
-    return master_with_schedules
-
-
-@router.delete("/{master_id}")
-async def delete_master(
-    master_id: UUID,
-    current_user: User = Depends(require_role(UserRole.OWNER)),
-    db: AsyncSession = Depends(get_db)
-):
     service = MasterService(db)
-    await service.delete_master(master_id)
-    return {"message": "Master deleted successfully"}
-
-# ---------------------- Schedule routes ----------------------
-@router.get("/{master_id}/schedule")
-async def get_master_schedule(
-    master_id: UUID,
-    date_from: Optional[date] = Query(None),
-    date_to: Optional[date] = Query(None),
-    current_user: Optional[User] = Depends(get_current_user_optional),
-    db: AsyncSession = Depends(get_db)
-):
-    service = MasterService(db)
-    schedule = await service.get_schedule(master_id, date_from, date_to)
+    schedule = await service.get_schedule(master.id)
     return schedule
 
-@router.put("/{master_id}/schedule")
-async def update_master_schedule(
-    master_id: UUID,
-    schedule_data: List[dict],
-    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.MASTER])),
-    db: AsyncSession = Depends(get_db)
-):
-    service = MasterService(db)
-    if current_user.role == UserRole.MASTER:
-        master = await service.get_master(master_id)
-        if master.user_id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
-    await service.update_schedule(master_id, schedule_data)
-    return {"message": "Schedule updated successfully"}
-
-# ---------------------- Block-time route ----------------------
-@router.post("/{master_id}/block-time")
-async def create_block_time(
-    master_id: UUID,
+@router.post("/block-time")
+async def block_my_time(
     block_data: dict,
-    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.MASTER])),
+    current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
+    """Заблокировать время"""
+    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
+    master = result.scalar_one_or_none()
+    
+    if not master:
+        raise HTTPException(status_code=404, detail="Master profile not found")
+    
+    if not master.can_edit_schedule:
+        raise HTTPException(
+            status_code=403,
+            detail="Schedule editing permission required. Contact your manager."
+        )
+    
     service = MasterService(db)
-    if current_user.role == UserRole.MASTER:
-        master = await service.get_master(master_id)
-        if master.user_id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
-    block = await service.create_block_time(master_id, block_data)
+    block = await service.create_block_time(master.id, block_data)
     return block
 
-# ---------------------- Services routes ----------------------
-@router.get("/{master_id}/services")
-async def get_master_services(
-    master_id: UUID,
-    current_user: Optional[User] = Depends(get_current_user_optional),
+# ---------------------- Admin endpoints for permissions ----------------------
+@router.get("/permission-requests")
+async def get_permission_requests(
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
     db: AsyncSession = Depends(get_db)
 ):
-    service = MasterService(db)
-    services = await service.get_master_services(master_id)
-    return services
+    """Получить запросы разрешений (для менеджеров)"""
+    permission_service = PermissionRequestService(db)
+    requests = await permission_service.get_requests_for_tenant(current_user.tenant_id)
+    
+    return [
+        {
+            "id": str(req.id),
+            "master_id": str(req.master_id),
+            "permission_type": req.permission_type.value,
+            "reason": req.reason,
+            "additional_info": req.additional_info,
+            "status": req.status.value,
+            "created_at": req.created_at.isoformat(),
+            "reviewed_at": req.reviewed_at.isoformat() if req.reviewed_at else None,
+            "review_note": req.review_note
+        }
+        for req in requests
+    ]
 
-@router.put("/{master_id}/services")
-async def update_master_services(
-    master_id: UUID,
-    service_ids: List[UUID],
-    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.MASTER])),
+@router.put("/permission-requests/{request_id}/approve")
+async def approve_permission_request(
+    request_id: UUID,
+    review_data: dict,
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
     db: AsyncSession = Depends(get_db)
 ):
-    service = MasterService(db)
-    await service.update_master_services(master_id, service_ids)
-    return {"message": "Services updated successfully"}
+    """Одобрить запрос разрешения"""
+    permission_service = PermissionRequestService(db)
+    success = await permission_service.approve_request(
+        request_id=request_id,
+        reviewer_id=current_user.id,
+        review_note=review_data.get("review_note")
+    )
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Request not found or already processed")
+    
+    return {"message": "Permission request approved"}
+
+@router.put("/permission-requests/{request_id}/reject")
+async def reject_permission_request(
+    request_id: UUID,
+    review_data: dict,
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_db)
+):
+    """Отклонить запрос разрешения"""
+    permission_service = PermissionRequestService(db)
+    success = await permission_service.reject_request(
+        request_id=request_id,
+        reviewer_id=current_user.id,
+        review_note=review_data.get("review_note")
+    )
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Request not found or already processed")
+    
+    return {"message": "Permission request rejected"}
+
+@router.put("/{master_id}/permissions")
+async def update_master_permissions(
+    master_id: UUID,
+    permissions_data: MasterPermissionsUpdate,
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_db)
+):
+    """Обновить права мастера (только для владельцев)"""
+    result = await db.execute(select(Master).where(Master.id == master_id))
+    master = result.scalar_one_or_none()
+    
+    if not master:
+        raise HTTPException(status_code=404, detail="Master not found")
+    
+    # Проверяем что мастер из того же тенанта
+    if master.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Обновляем права
+    update_data = permissions_data.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(master, key, value)
+    
+    master.updated_at = datetime.utcnow()
+    await db.commit()
+    
+    return {"message": "Permissions updated successfully"}
+
+# ---------------------- Static file serving ----------------------
+from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI
+
+# Добавить в main.py:
+# app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")

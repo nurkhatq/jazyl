@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, delete
+from sqlalchemy import select, and_, delete, text
 from typing import Optional, List
 from datetime import date, datetime
 from uuid import UUID
@@ -170,33 +170,67 @@ class MasterService:
             ]
         }
     
-    async def update_schedule(self, master_id: UUID, schedule_data: List[dict]) -> None:
-        # Delete existing schedules
-        await self.db.execute(
-            delete(MasterSchedule).where(MasterSchedule.master_id == master_id)
-        )
-        
-        # Create new schedules
-        for schedule_item in schedule_data:
-            schedule = MasterSchedule(
-                master_id=master_id,
-                **schedule_item
+    async def update_schedule(self, master_id: UUID, schedule_data: List[dict]) -> bool:
+        """Обновить расписание мастера"""
+        try:
+            # Удаляем старое расписание
+            await self.db.execute(
+                delete(MasterSchedule).where(MasterSchedule.master_id == master_id)
             )
-            self.db.add(schedule)
-        
-        await self.db.commit()
+            
+            # Создаем новое расписание
+            for day_data in schedule_data:
+                schedule = MasterSchedule(
+                    master_id=master_id,
+                    day_of_week=day_data["day_of_week"],
+                    start_time=day_data["start_time"],
+                    end_time=day_data["end_time"],
+                    is_working=day_data.get("is_working", True)
+                )
+                self.db.add(schedule)
+            
+            await self.db.commit()
+            return True
+            
+        except Exception as e:
+            await self.db.rollback()
+            raise ValueError(f"Failed to update schedule: {str(e)}")
     
-    async def create_block_time(self, master_id: UUID, block_data: dict) -> BlockTime:
-        block = BlockTime(
-            master_id=master_id,
-            **block_data
-        )
-        
-        self.db.add(block)
-        await self.db.commit()
-        await self.db.refresh(block)
-        
-        return block
+    async def create_block_time(self, master_id: UUID, block_data: dict) -> dict:
+        """Создать блокировку времени"""
+        try:
+            # Парсим время
+            start_time = datetime.fromisoformat(block_data["start_time"])
+            end_time = datetime.fromisoformat(block_data["end_time"])
+            
+            # Проверяем что время корректное
+            if start_time >= end_time:
+                raise ValueError("End time must be after start time")
+            
+            # Создаем блокировку
+            block_time = BlockTime(
+                master_id=master_id,
+                start_time=start_time,
+                end_time=end_time,
+                reason=block_data.get("reason", "break"),
+                description=block_data.get("description", "")
+            )
+            
+            self.db.add(block_time)
+            await self.db.commit()
+            await self.db.refresh(block_time)
+            
+            return {
+                "id": str(block_time.id),
+                "start_time": block_time.start_time.isoformat(),
+                "end_time": block_time.end_time.isoformat(),
+                "reason": block_time.reason,
+                "description": block_time.description
+            }
+            
+        except Exception as e:
+            await self.db.rollback()
+            raise ValueError(f"Failed to create block time: {str(e)}")
     
     async def get_master_services(self, master_id: UUID) -> List[dict]:
         result = await self.db.execute(
@@ -216,6 +250,47 @@ class MasterService:
                 "custom_duration": s.custom_duration
             }
             for s in services
+        ]
+    
+    async def get_master_clients(self, master_id: UUID) -> List[dict]:
+        """Получить клиентов мастера"""
+        from app.models.booking import Booking, BookingStatus
+        from app.models.client import Client
+        
+        # Получаем уникальных клиентов мастера с статистикой
+        query = """
+        SELECT 
+            c.*,
+            COUNT(b.id) as total_bookings,
+            COUNT(CASE WHEN b.status = 'completed' THEN 1 END) as completed_bookings,
+            COUNT(CASE WHEN b.status = 'cancelled' THEN 1 END) as cancelled_bookings,
+            COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.price ELSE 0 END), 0) as total_spent,
+            MAX(CASE WHEN b.status = 'completed' THEN b.date END) as last_booking_date
+        FROM clients c
+        JOIN bookings b ON c.id = b.client_id
+        WHERE b.master_id = :master_id
+        GROUP BY c.id
+        ORDER BY total_bookings DESC
+        """
+        
+        result = await self.db.execute(text(query), {"master_id": master_id})
+        clients = result.fetchall()
+        
+        return [
+            {
+                "id": str(client.id),
+                "first_name": client.first_name,
+                "last_name": client.last_name,
+                "email": client.email,
+                "phone": client.phone,
+                "total_bookings": client.total_bookings,
+                "completed_bookings": client.completed_bookings,
+                "cancelled_bookings": client.cancelled_bookings,
+                "total_spent": float(client.total_spent),
+                "last_booking_date": client.last_booking_date.isoformat() if client.last_booking_date else None,
+                "created_at": client.created_at.isoformat()
+            }
+            for client in clients
         ]
     
     async def update_master_services(self, master_id: UUID, service_ids: List[UUID]) -> None:

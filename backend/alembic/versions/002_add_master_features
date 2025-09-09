@@ -1,0 +1,89 @@
+"""Add master permissions and related tables
+
+Revision ID: 002_add_master_features
+Revises: 001_add_master_permissions
+Create Date: 2025-09-10 13:00:00.000000
+
+"""
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
+
+# revision identifiers
+revision = '002_add_master_features'
+down_revision = '001_add_master_permissions'
+branch_labels = None
+depends_on = None
+
+def upgrade() -> None:
+    # Создаем enum для статусов запросов разрешений
+    permission_status_enum = postgresql.ENUM(
+        'pending', 'approved', 'rejected',
+        name='permissionrequeststatus'
+    )
+    permission_status_enum.create(op.get_bind())
+    
+    # Создаем enum для типов разрешений
+    permission_type_enum = postgresql.ENUM(
+        'edit_schedule', 'edit_services', 'edit_profile', 
+        'upload_photos', 'manage_bookings', 'view_analytics',
+        name='permissionrequesttype'
+    )
+    permission_type_enum.create(op.get_bind())
+    
+    # Создаем таблицу запросов разрешений
+    op.create_table(
+        'permission_requests',
+        sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False, default=sa.text('gen_random_uuid()')),
+        sa.Column('master_id', postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column('tenant_id', postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column('permission_type', permission_type_enum, nullable=False),
+        sa.Column('reason', sa.Text(), nullable=False),
+        sa.Column('additional_info', sa.Text(), nullable=True),
+        sa.Column('status', permission_status_enum, nullable=False, default='pending'),
+        sa.Column('reviewed_by', postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column('review_note', sa.Text(), nullable=True),
+        sa.Column('reviewed_at', sa.DateTime(), nullable=True),
+        sa.Column('created_at', sa.DateTime(), nullable=False, default=sa.func.now()),
+        sa.Column('updated_at', sa.DateTime(), nullable=False, default=sa.func.now()),
+        sa.ForeignKeyConstraint(['master_id'], ['masters.id'], ),
+        sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ),
+        sa.ForeignKeyConstraint(['reviewed_by'], ['users.id'], ),
+        sa.PrimaryKeyConstraint('id')
+    )
+    
+    # Создаем таблицу блокировки времени
+    op.create_table(
+        'block_times',
+        sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False, default=sa.text('gen_random_uuid()')),
+        sa.Column('master_id', postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column('start_time', sa.DateTime(), nullable=False),
+        sa.Column('end_time', sa.DateTime(), nullable=False),
+        sa.Column('reason', sa.String(), nullable=False),
+        sa.Column('description', sa.Text(), nullable=True),
+        sa.Column('created_at', sa.DateTime(), nullable=False, default=sa.func.now()),
+        sa.Column('updated_at', sa.DateTime(), nullable=False, default=sa.func.now()),
+        sa.ForeignKeyConstraint(['master_id'], ['masters.id'], ),
+        sa.PrimaryKeyConstraint('id')
+    )
+    
+    # Создаем индексы для производительности
+    op.create_index('idx_permission_requests_master_id', 'permission_requests', ['master_id'])
+    op.create_index('idx_permission_requests_status', 'permission_requests', ['status'])
+    op.create_index('idx_block_times_master_id', 'block_times', ['master_id'])
+    op.create_index('idx_block_times_time_range', 'block_times', ['start_time', 'end_time'])
+
+def downgrade() -> None:
+    # Удаляем индексы
+    op.drop_index('idx_block_times_time_range', table_name='block_times')
+    op.drop_index('idx_block_times_master_id', table_name='block_times')
+    op.drop_index('idx_permission_requests_status', table_name='permission_requests')
+    op.drop_index('idx_permission_requests_master_id', table_name='permission_requests')
+    
+    # Удаляем таблицы
+    op.drop_table('block_times')
+    op.drop_table('permission_requests')
+    
+    # Удаляем enum типы
+    op.execute('DROP TYPE permissionrequesttype')
+    op.execute('DROP TYPE permissionrequeststatus')

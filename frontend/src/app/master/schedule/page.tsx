@@ -2,8 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Calendar } from '@/components/ui/calendar'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
@@ -13,19 +12,16 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useAuthStore } from '@/lib/store'
 import api from '@/lib/api'
-import { format, startOfDay, isSameDay } from 'date-fns'
+import { format, addDays, startOfWeek, isSameDay } from 'date-fns'
 import { 
-  Clock, 
-  Calendar as CalendarIcon, 
-  Plus, 
-  X, 
+  ChevronLeft, 
+  ChevronRight, 
+  Plus,
+  Clock,
   Pause,
-  Play,
-  Settings,
-  AlertCircle,
-  Eye,
-  EyeOff,
-  DollarSign
+  AlertTriangle,
+  Check,
+  X
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
@@ -33,9 +29,10 @@ export default function MasterSchedulePage() {
   const user = useAuthStore((state) => state.user)
   const { toast } = useToast()
   const queryClient = useQueryClient()
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date())
+  
+  const [selectedDate, setSelectedDate] = useState(new Date())
+  const [weekStart, setWeekStart] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }))
   const [blockDialogOpen, setBlockDialogOpen] = useState(false)
-  const [viewMode, setViewMode] = useState<'day' | 'week'>('day')
   const [blockData, setBlockData] = useState({
     start_time: '',
     end_time: '',
@@ -53,11 +50,22 @@ export default function MasterSchedulePage() {
     enabled: !!user?.id,
   })
 
+  // Получаем расписание мастера
+  const { data: schedule } = useQuery({
+    queryKey: ['master-schedule', masterInfo?.id],
+    queryFn: async () => {
+      if (!masterInfo?.id) return null
+      const response = await api.get(`/api/masters/${masterInfo.id}/schedule`)
+      return response.data
+    },
+    enabled: !!masterInfo?.id
+  })
+
   // Получаем записи на выбранную дату
-  const { data: bookings, isLoading: bookingsLoading } = useQuery({
+  const { data: bookings } = useQuery({
     queryKey: ['master-bookings', masterInfo?.id, selectedDate],
     queryFn: async () => {
-      if (!masterInfo?.id || !selectedDate) return []
+      if (!masterInfo?.id) return []
       const response = await api.get('/api/bookings', {
         params: {
           master_id: masterInfo.id,
@@ -67,34 +75,7 @@ export default function MasterSchedulePage() {
       })
       return response.data
     },
-    enabled: !!masterInfo?.id && !!selectedDate
-  })
-
-  // Получаем расписание работы
-  const { data: workingHours } = useQuery({
-    queryKey: ['master-working-hours', masterInfo?.id],
-    queryFn: async () => {
-      if (!masterInfo?.id) return null
-      const response = await api.get(`/api/masters/${masterInfo.id}/schedule`)
-      return response.data
-    },
     enabled: !!masterInfo?.id
-  })
-
-  // Получаем заблокированное время
-  const { data: blockedTimes } = useQuery({
-    queryKey: ['master-blocked-times', masterInfo?.id, selectedDate],
-    queryFn: async () => {
-      if (!masterInfo?.id || !selectedDate) return []
-      const response = await api.get('/api/block-times', {
-        params: {
-          master_id: masterInfo.id,
-          date: format(selectedDate, 'yyyy-MM-dd')
-        }
-      })
-      return response.data
-    },
-    enabled: !!masterInfo?.id && !!selectedDate
   })
 
   // Блокировка времени
@@ -102,70 +83,44 @@ export default function MasterSchedulePage() {
     mutationFn: async (data: any) => {
       const response = await api.post(`/api/masters/${masterInfo?.id}/block-time`, {
         ...data,
-        date: selectedDate ? format(selectedDate, 'yyyy-MM-dd') : undefined
+        start_time: `${format(selectedDate, 'yyyy-MM-dd')} ${data.start_time}:00`,
+        end_time: `${format(selectedDate, 'yyyy-MM-dd')} ${data.end_time}:00`,
       })
       return response.data
     },
     onSuccess: () => {
       toast({
-        title: "Success",
-        description: "Time blocked successfully"
+        title: "Время заблокировано",
+        description: "Временной слот успешно заблокирован"
       })
-      queryClient.invalidateQueries({ queryKey: ['master-blocked-times'] })
+      queryClient.invalidateQueries({ queryKey: ['master-bookings'] })
       setBlockDialogOpen(false)
       setBlockData({ start_time: '', end_time: '', reason: 'break', description: '' })
     },
-    onError: (error: any) => {
+    onError: () => {
       toast({
-        title: "Error",
-        description: error.response?.data?.detail || "Failed to block time",
+        title: "Ошибка",
+        description: "Не удалось заблокировать время",
         variant: "destructive"
       })
-    }
-  })
-
-  // Переключение статуса мастера (активный/неактивный)
-  const toggleStatusMutation = useMutation({
-    mutationFn: async (isActive: boolean) => {
-      const response = await api.put(`/api/masters/${masterInfo?.id}`, {
-        is_active: isActive
-      })
-      return response.data
-    },
-    onSuccess: () => {
-      toast({
-        title: "Success", 
-        description: "Status updated successfully"
-      })
-      queryClient.invalidateQueries({ queryKey: ['master-info'] })
     }
   })
 
   const handleBlockTime = () => {
     if (!blockData.start_time || !blockData.end_time) {
       toast({
-        title: "Error",
-        description: "Please select start and end time",
+        title: "Ошибка",
+        description: "Выберите время начала и окончания",
         variant: "destructive"
       })
       return
     }
-
     blockTimeMutation.mutate(blockData)
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'confirmed': return 'default'
-      case 'completed': return 'secondary'
-      case 'cancelled': return 'destructive'
-      case 'pending': return 'outline'
-      default: return 'outline'
-    }
-  }
-
-  const generateTimeSlots = () => {
-    const slots = []
+  // Генерация временных слотов
+  const generateTimeSlots = (): string[] => {
+    const slots: string[] = []
     for (let hour = 9; hour <= 21; hour++) {
       for (let minute = 0; minute < 60; minute += 30) {
         const time = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
@@ -176,408 +131,370 @@ export default function MasterSchedulePage() {
   }
 
   const timeSlots = generateTimeSlots()
-  const selectedDateBookings = bookings || []
-  const selectedDateBlocked = blockedTimes || []
+
+  // Неделя для навигации
+  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'confirmed': return 'bg-blue-500'
+      case 'completed': return 'bg-green-500'
+      case 'cancelled': return 'bg-red-500'
+      case 'pending': return 'bg-orange-500'
+      default: return 'bg-gray-500'
+    }
+  }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight">Schedule Management</h2>
-          <p className="text-muted-foreground">
-            Manage your working hours and appointments
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant={masterInfo?.is_active ? "default" : "outline"}
-            onClick={() => toggleStatusMutation.mutate(!masterInfo?.is_active)}
-            disabled={toggleStatusMutation.isPending}
-          >
-            {masterInfo?.is_active ? (
-              <>
-                <Pause className="mr-2 h-4 w-4" />
-                Go Offline
-              </>
-            ) : (
-              <>
-                <Play className="mr-2 h-4 w-4" />
-                Go Online
-              </>
-            )}
-          </Button>
-          
-          <Dialog open={blockDialogOpen} onOpenChange={setBlockDialogOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                Block Time
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Block Time</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4">
-                <div>
-                  <Label>Date</Label>
-                  <div className="text-sm text-muted-foreground">
-                    {selectedDate ? format(selectedDate, 'EEEE, MMMM d, yyyy') : 'No date selected'}
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="start_time">Start Time</Label>
-                    <Select value={blockData.start_time} onValueChange={(value) => setBlockData(prev => ({ ...prev, start_time: value }))}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select start time" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {timeSlots.map(time => (
-                          <SelectItem key={time} value={time}>{time}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor="end_time">End Time</Label>
-                    <Select value={blockData.end_time} onValueChange={(value) => setBlockData(prev => ({ ...prev, end_time: value }))}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select end time" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {timeSlots.map(time => (
-                          <SelectItem key={time} value={time}>{time}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div>
-                  <Label htmlFor="reason">Reason</Label>
-                  <Select value={blockData.reason} onValueChange={(value) => setBlockData(prev => ({ ...prev, reason: value }))}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="break">Break</SelectItem>
-                      <SelectItem value="lunch">Lunch</SelectItem>
-                      <SelectItem value="personal">Personal Time</SelectItem>
-                      <SelectItem value="meeting">Meeting</SelectItem>
-                      <SelectItem value="sick">Sick Leave</SelectItem>
-                      <SelectItem value="vacation">Vacation</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Label htmlFor="description">Description (Optional)</Label>
-                  <Textarea
-                    id="description"
-                    value={blockData.description}
-                    onChange={(e) => setBlockData(prev => ({ ...prev, description: e.target.value }))}
-                    placeholder="Add notes about this blocked time..."
-                  />
-                </div>
-
-                <div className="flex justify-end space-x-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => setBlockDialogOpen(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={handleBlockTime}
-                    disabled={blockTimeMutation.isPending}
-                  >
-                    {blockTimeMutation.isPending ? "Blocking..." : "Block Time"}
-                  </Button>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
-        </div>
+    <div className="min-h-screen bg-gray-50">
+      {/* Mobile Header */}
+      <div className="bg-white border-b px-4 py-3 sticky top-0 z-10">
+        <h1 className="text-lg font-semibold text-center">Расписание</h1>
       </div>
 
-      {/* Status Card */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <div className={`w-3 h-3 rounded-full ${masterInfo?.is_active ? 'bg-green-500' : 'bg-gray-400'}`} />
-              <div>
-                <p className="font-medium">
-                  Status: {masterInfo?.is_active ? 'Online' : 'Offline'}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {masterInfo?.is_active 
-                    ? 'Available for new bookings' 
-                    : 'Not accepting new bookings'}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-2">
-              {masterInfo?.is_visible ? (
-                <Badge variant="default">
-                  <Eye className="mr-1 h-3 w-3" />
-                  Visible to clients
-                </Badge>
-              ) : (
-                <Badge variant="secondary">
-                  <EyeOff className="mr-1 h-3 w-3" />
-                  Hidden from clients
-                </Badge>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-6 md:grid-cols-3">
-        {/* Calendar */}
+      <div className="p-4 space-y-4">
+        {/* Week Navigation */}
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CalendarIcon className="h-5 w-5" />
-              Calendar
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Calendar
-              mode="single"
-              selected={selectedDate}
-              onSelect={setSelectedDate}
-              className="rounded-md border"
-              modifiers={{
-                hasBookings: (date) => {
-                  // This would need actual data to highlight dates with bookings
-                  return false
-                }
-              }}
-            />
+          <CardContent className="p-3">
+            <div className="flex items-center justify-between mb-3">
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={() => setWeekStart(addDays(weekStart, -7))}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="font-medium">
+                {format(weekStart, 'dd MMM')} - {format(addDays(weekStart, 6), 'dd MMM')}
+              </span>
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={() => setWeekStart(addDays(weekStart, 7))}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
             
-            <div className="mt-4 space-y-2">
-              <div className="flex items-center gap-2 text-sm">
-                <div className="w-3 h-3 bg-blue-500 rounded-full" />
-                <span>Has appointments</span>
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <div className="w-3 h-3 bg-red-500 rounded-full" />
-                <span>Blocked time</span>
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <div className="w-3 h-3 bg-gray-300 rounded-full" />
-                <span>Available</span>
-              </div>
+            <div className="grid grid-cols-7 gap-1">
+              {weekDays.map((day, index) => {
+                const isSelected = isSameDay(day, selectedDate)
+                const isToday = isSameDay(day, new Date())
+                
+                return (
+                  <button
+                    key={index}
+                    onClick={() => setSelectedDate(day)}
+                    className={`p-2 rounded-lg text-center transition-colors ${
+                      isSelected
+                        ? 'bg-blue-500 text-white'
+                        : isToday
+                        ? 'bg-blue-50 text-blue-600'
+                        : 'hover:bg-gray-100'
+                    }`}
+                  >
+                    <div className="text-xs text-gray-500 mb-1">
+                      {format(day, 'EEE')}
+                    </div>
+                    <div className="text-sm font-medium">
+                      {format(day, 'd')}
+                    </div>
+                  </button>
+                )
+              })}
             </div>
           </CardContent>
         </Card>
 
-        {/* Day Schedule */}
-        <Card className="md:col-span-2">
-          <CardHeader>
+        {/* Selected Date Info */}
+        <Card>
+          <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Clock className="h-5 w-5" />
-                  {selectedDate ? format(selectedDate, 'EEEE, MMMM d, yyyy') : 'Select a date'}
-                </CardTitle>
-                <CardDescription>
-                  {selectedDateBookings.length} appointments, {selectedDateBlocked.length} blocked slots
-                </CardDescription>
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant={viewMode === 'day' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setViewMode('day')}
-                >
-                  Day
-                </Button>
-                <Button
-                  variant={viewMode === 'week' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setViewMode('week')}
-                >
-                  Week
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {bookingsLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900" />
-              </div>
-            ) : (
-              <div className="space-y-2 max-h-96 overflow-y-auto">
-                {timeSlots.map(timeSlot => {
-                  const booking = selectedDateBookings.find((b: any) => 
-                    format(new Date(b.date), 'HH:mm') === timeSlot
-                  )
-                  const blocked = selectedDateBlocked.find((b: any) => 
-                    b.start_time <= timeSlot && b.end_time > timeSlot
-                  )
-
-                  return (
-                    <div key={timeSlot} className="flex items-center space-x-4 p-2 rounded-lg hover:bg-gray-50">
-                      <div className="w-16 text-sm font-medium text-gray-600">
-                        {timeSlot}
+              <CardTitle className="text-base">
+                {format(selectedDate, 'EEEE, d MMMM')}
+              </CardTitle>
+              <Dialog open={blockDialogOpen} onOpenChange={setBlockDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm" variant="outline">
+                    <Plus className="h-4 w-4 mr-1" />
+                    Блок
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-sm mx-4">
+                  <DialogHeader>
+                    <DialogTitle>Заблокировать время</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label htmlFor="start_time">Начало</Label>
+                        <Select value={blockData.start_time} onValueChange={(value) => setBlockData(prev => ({ ...prev, start_time: value }))}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Время" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {timeSlots.map(time => (
+                              <SelectItem key={time} value={time}>{time}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                       
-                      <div className="flex-1">
-                        {booking ? (
-                          <div className="flex items-center justify-between p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                            <div className="flex items-center space-x-3">
-                              <div>
-                                <p className="font-medium text-sm">{booking.client_name}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {booking.service_name} • {booking.duration || 30}min
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <Badge variant={getStatusColor(booking.status)}>
-                                {booking.status}
-                              </Badge>
-                              <span className="text-sm font-medium">${booking.price}</span>
-                            </div>
+                      <div>
+                        <Label htmlFor="end_time">Конец</Label>
+                        <Select value={blockData.end_time} onValueChange={(value) => setBlockData(prev => ({ ...prev, end_time: value }))}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Время" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {timeSlots.map(time => (
+                              <SelectItem key={time} value={time}>{time}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label htmlFor="reason">Причина</Label>
+                      <Select value={blockData.reason} onValueChange={(value) => setBlockData(prev => ({ ...prev, reason: value }))}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="break">Перерыв</SelectItem>
+                          <SelectItem value="lunch">Обед</SelectItem>
+                          <SelectItem value="personal">Личное время</SelectItem>
+                          <SelectItem value="sick">Больничный</SelectItem>
+                          <SelectItem value="vacation">Отпуск</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <Label htmlFor="description">Заметка</Label>
+                      <Textarea
+                        id="description"
+                        value={blockData.description}
+                        onChange={(e) => setBlockData(prev => ({ ...prev, description: e.target.value }))}
+                        placeholder="Дополнительная информация..."
+                        rows={2}
+                      />
+                    </div>
+
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => setBlockDialogOpen(false)}
+                        className="flex-1"
+                      >
+                        Отмена
+                      </Button>
+                      <Button
+                        onClick={handleBlockTime}
+                        disabled={blockTimeMutation.isPending}
+                        className="flex-1"
+                      >
+                        {blockTimeMutation.isPending ? "Сохранение..." : "Сохранить"}
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="text-sm text-gray-600">
+              Записей: {bookings?.length || 0} • 
+              Доход: ${bookings?.reduce((sum: number, booking: any) => 
+                booking.status !== 'cancelled' ? sum + (booking.price || 0) : sum, 0) || 0}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Timeline */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Clock className="h-4 w-4" />
+              График дня
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {timeSlots.map(timeSlot => {
+                const booking = bookings?.find((b: any) => 
+                  format(new Date(b.date), 'HH:mm') === timeSlot
+                )
+
+                return (
+                  <div key={timeSlot} className="flex items-center gap-3">
+                    <div className="w-12 text-xs text-gray-500 font-mono">
+                      {timeSlot}
+                    </div>
+                    
+                    <div className="flex-1">
+                      {booking ? (
+                        <div className="bg-white border-l-4 border-blue-500 rounded-r-lg p-3 shadow-sm">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-medium text-sm">{booking.client_name}</span>
+                            <div className={`w-2 h-2 rounded-full ${getStatusColor(booking.status)}`} />
                           </div>
-                        ) : blocked ? (
-                          <div className="flex items-center justify-between p-3 bg-red-50 border border-red-200 rounded-lg">
-                            <div className="flex items-center space-x-3">
-                              <Pause className="h-4 w-4 text-red-600" />
-                              <div>
-                                <p className="font-medium text-sm text-red-900">Blocked</p>
-                                <p className="text-xs text-red-600">
-                                  {blocked.reason} {blocked.description && `• ${blocked.description}`}
-                                </p>
-                              </div>
-                            </div>
-                            <Button variant="ghost" size="sm">
-                              <X className="h-4 w-4" />
-                            </Button>
+                          <div className="text-xs text-gray-600 mb-1">
+                            {booking.service_name}
                           </div>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-gray-500">{booking.duration || 30}мин</span>
+                            <span className="font-medium">${booking.price}</span>
+                          </div>
+                          {booking.status === 'pending' && (
+                            <div className="flex gap-2 mt-2">
+                              <Button size="sm" variant="outline" className="h-6 text-xs px-2">
+                                <Check className="h-3 w-3 mr-1" />
+                                Принять
+                              </Button>
+                              <Button size="sm" variant="outline" className="h-6 text-xs px-2">
+                                <X className="h-3 w-3 mr-1" />
+                                Отклонить
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="h-2 bg-gray-100 rounded-full" />
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Working Hours Settings */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Рабочие часы</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {schedule?.regular_schedule ? (
+              <div className="space-y-3">
+                {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day, index) => {
+                  const daySchedule = schedule.regular_schedule.find((s: any) => s.day_of_week === index)
+                  
+                  return (
+                    <div key={day} className="flex items-center justify-between">
+                      <span className="text-sm font-medium w-8">{day}</span>
+                      <div className="flex-1 mx-3">
+                        {daySchedule?.is_working ? (
+                          <span className="text-sm text-gray-600">
+                            {daySchedule.start_time} - {daySchedule.end_time}
+                          </span>
                         ) : (
-                          <div className="p-3 border-2 border-dashed border-gray-200 rounded-lg text-center">
-                            <span className="text-sm text-gray-400">Available</span>
-                          </div>
+                          <span className="text-sm text-gray-400">Выходной</span>
                         )}
                       </div>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="h-6 w-12 text-xs"
+                        disabled={!masterInfo?.can_edit_schedule}
+                      >
+                        {masterInfo?.can_edit_schedule ? 'Изменить' : 'Запросить'}
+                      </Button>
                     </div>
                   )
                 })}
               </div>
+            ) : (
+              <div className="text-center py-4 text-gray-500">
+                <AlertTriangle className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">Рабочие часы не настроены</p>
+                <Button 
+                  size="sm" 
+                  className="mt-2"
+                  disabled={!masterInfo?.can_edit_schedule}
+                >
+                  {masterInfo?.can_edit_schedule ? 'Настроить' : 'Запросить доступ'}
+                </Button>
+              </div>
             )}
           </CardContent>
         </Card>
-      </div>
 
-      {/* Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-4">
+        {/* Quick Stats */}
+        <div className="grid grid-cols-3 gap-3">
+          <Card>
+            <CardContent className="p-3 text-center">
+              <div className="text-lg font-bold text-blue-600">
+                {bookings?.filter((b: any) => b.status === 'confirmed').length || 0}
+              </div>
+              <div className="text-xs text-gray-600">Подтверждено</div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardContent className="p-3 text-center">
+              <div className="text-lg font-bold text-orange-600">
+                {bookings?.filter((b: any) => b.status === 'pending').length || 0}
+              </div>
+              <div className="text-xs text-gray-600">Ожидает</div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardContent className="p-3 text-center">
+              <div className="text-lg font-bold text-green-600">
+                {bookings?.filter((b: any) => b.status === 'completed').length || 0}
+              </div>
+              <div className="text-xs text-gray-600">Завершено</div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Status Controls */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Today's Appointments</CardTitle>
-            <CalendarIcon className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {selectedDate && isSameDay(selectedDate, new Date()) ? selectedDateBookings.length : 0}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {selectedDateBookings.filter((b: any) => b.status === 'confirmed').length} confirmed
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Blocked Hours</CardTitle>
-            <Pause className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{selectedDateBlocked.length}</div>
-            <p className="text-xs text-muted-foreground">slots blocked</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Available Hours</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {timeSlots.length - selectedDateBookings.length - selectedDateBlocked.length}
-            </div>
-            <p className="text-xs text-muted-foreground">slots available</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Daily Revenue</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              ${selectedDateBookings
-                .filter((b: any) => b.status !== 'cancelled')
-                .reduce((sum: number, booking: any) => sum + (booking.price || 0), 0)}
-            </div>
-            <p className="text-xs text-muted-foreground">expected revenue</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Working Hours Settings */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Settings className="h-5 w-5" />
-                Working Hours
-              </CardTitle>
-              <CardDescription>Configure your default working schedule</CardDescription>
-            </div>
-            <Button variant="outline" size="sm">
-              <Settings className="mr-2 h-4 w-4" />
-              Edit Schedule
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {workingHours ? (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => (
-                <div key={day} className="space-y-2">
-                  <div className="font-medium text-sm">{day}</div>
-                  <div className="text-sm text-muted-foreground">
-                    9:00 AM - 6:00 PM
-                  </div>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-medium">Статус работы</div>
+                <div className="text-sm text-gray-600">
+                  {masterInfo?.is_active ? 'Принимаю записи' : 'Не работаю'}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-8 text-muted-foreground">
-              <AlertCircle className="mx-auto h-12 w-12 mb-4 opacity-50" />
-              <p className="font-medium">No working hours configured</p>
-              <p className="text-sm">Set up your default schedule to help clients book appointments</p>
-              <Button className="mt-4" size="sm">
-                <Plus className="mr-2 h-4 w-4" />
-                Configure Working Hours
+              </div>
+              <Button 
+                variant={masterInfo?.is_active ? "secondary" : "default"}
+                className="flex items-center gap-2"
+              >
+                <Pause className="h-4 w-4" />
+                {masterInfo?.is_active ? 'Пауза' : 'Работать'}
               </Button>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+
+        {/* Permissions Notice */}
+        {!masterInfo?.can_edit_schedule && (
+          <Card className="border-orange-200 bg-orange-50">
+            <CardContent className="p-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 text-orange-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-orange-800">
+                    Ограниченные права
+                  </p>
+                  <p className="text-xs text-orange-600 mt-1">
+                    Для изменения расписания обратитесь к менеджеру
+                  </p>
+                  <Button size="sm" variant="outline" className="mt-2 h-7 text-xs">
+                    Запросить доступ
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </div>
   )
 }
