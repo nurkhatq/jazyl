@@ -7,12 +7,12 @@ EMAIL="admin@jazyl.tech"
 
 # Install certbot if not present
 if ! command -v certbot &> /dev/null; then
-    apt-get update
-    apt-get install -y certbot
+    sudo apt-get update
+    sudo apt-get install -y certbot
 fi
 
 # Generate certificates
-certbot certonly \
+sudo certbot certonly \
     --standalone \
     --non-interactive \
     --agree-tos \
@@ -21,11 +21,11 @@ certbot certonly \
     --expand
 
 # Copy certificates to nginx directory
-cp /etc/letsencrypt/live/$DOMAIN/fullchain.pem ./nginx/ssl/$DOMAIN.crt
-cp /etc/letsencrypt/live/$DOMAIN/privkey.pem ./nginx/ssl/$DOMAIN.key
+sudo cp /etc/letsencrypt/live/$DOMAIN/fullchain.pem ./nginx/ssl/$DOMAIN.crt
+sudo cp /etc/letsencrypt/live/$DOMAIN/privkey.pem ./nginx/ssl/$DOMAIN.key
 
 # Set proper permissions
-chmod 644 ./nginx/ssl/$DOMAIN.crt
-chmod 600 ./nginx/ssl/$DOMAIN.key
+sudo chmod 644 ./nginx/ssl/$DOMAIN.crt
+sudo chmod 600 ./nginx/ssl/$DOMAIN.key
 
 echo "SSL certificates generated successfully!"

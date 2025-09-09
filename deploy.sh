@@ -10,10 +10,6 @@ if [ ! -f "./backend/.env" ]; then
     exit 1
 fi
 
-# Create necessary directories
-mkdir -p nginx/ssl
-mkdir -p nginx/conf.d
-
 # Generate SSL certificates if they don't exist
 if [ ! -f "./nginx/ssl/jazyl.tech.crt" ]; then
     echo "📜 Generating SSL certificates..."
