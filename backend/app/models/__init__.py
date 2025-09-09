@@ -6,7 +6,7 @@ from app.models.booking import Booking, BookingStatus
 from app.models.client import Client
 from app.models.block_time import BlockTime
 from app.models.notification import Notification, NotificationTemplate
-
+from app.models.permission_request import PermissionRequest, PermissionRequestStatus, PermissionRequestType
 __all__ = [
     "Tenant",
     "User",
