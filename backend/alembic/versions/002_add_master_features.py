@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers
-revision = '002_add_master_features'
-down_revision = '001_add_master_permissions'
+revision = '003'
+down_revision = '002'
 branch_labels = None
 depends_on = None
 

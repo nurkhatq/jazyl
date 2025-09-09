@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers
-revision = 'add_master_permissions'
-down_revision = 'previous_revision'  # Замените на актуальную последнюю ревизию
+revision = '002'
+down_revision = '001'  # Замените на актуальную последнюю ревизию
 branch_labels = None
 depends_on = None
 
