@@ -1,6 +1,6 @@
 'use client'
 
-import { ReactNode, useEffect } from 'react'
+import { ReactNode, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -14,7 +14,6 @@ import {
   Menu,
   X
 } from 'lucide-react'
-import { useState } from 'react'
 
 interface MasterLayoutProps {
   children: ReactNode
@@ -24,6 +23,7 @@ export default function MasterLayout({ children }: MasterLayoutProps) {
   const pathname = usePathname()
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [isInitialized, setIsInitialized] = useState(false)
   const { user, clearAuth } = useAuthStore()
 
   const navigation = [
@@ -33,10 +33,23 @@ export default function MasterLayout({ children }: MasterLayoutProps) {
     { name: 'Settings', href: '/master/settings', icon: Settings },
   ]
 
-  // Защита роута - проверяем роль пользователя
+  // Ждём инициализации auth store
   useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsInitialized(true)
+    }, 100) // Небольшая задержка чтобы AuthProvider успел отработать
+
+    return () => clearTimeout(timer)
+  }, [])
+
+  // Защита роута - проверяем роль пользователя только после инициализации
+  useEffect(() => {
+    if (!isInitialized) return // Ждём инициализации
+
+    console.log('🔍 Master layout checking auth after init. User:', user)
+
     if (!user) {
-      console.log('❌ No user found in master layout, redirecting to login')
+      console.log('❌ No user found after init, redirecting to login')
       router.push('/login')
       return
     }
@@ -58,7 +71,7 @@ export default function MasterLayout({ children }: MasterLayoutProps) {
     }
 
     console.log('✅ Master layout access granted for:', user.email)
-  }, [user, router])
+  }, [user, router, isInitialized])
 
   const handleLogout = () => {
     console.log('🔄 Master logging out')
@@ -66,13 +79,20 @@ export default function MasterLayout({ children }: MasterLayoutProps) {
     router.push('/login')
   }
 
-  // Показываем загрузку пока проверяем права доступа
-  if (!user || user.role !== 'master') {
+  // Показываем загрузку пока не инициализировались или проверяем права доступа
+  if (!isInitialized || !user || user.role !== 'master') {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
           <p className="text-gray-600">Loading...</p>
+          {/* Debug info в development */}
+          {process.env.NODE_ENV === 'development' && (
+            <div className="mt-4 text-xs text-gray-400">
+              <p>Initialized: {isInitialized ? '✅' : '❌'}</p>
+              <p>User: {user ? `${user.email} (${user.role})` : '❌'}</p>
+            </div>
+          )}
         </div>
       </div>
     )

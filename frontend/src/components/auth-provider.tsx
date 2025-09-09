@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuthStore } from '@/lib/store'
 import Cookies from 'js-cookie'
 
@@ -10,11 +10,14 @@ import Cookies from 'js-cookie'
  */
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { user, setAuth, clearAuth } = useAuthStore()
+  const [isInitialized, setIsInitialized] = useState(false)
 
   useEffect(() => {
     // Инициализация аутентификации при загрузке приложения
     const initAuth = () => {
       try {
+        console.log('🔄 AuthProvider initializing...')
+
         // Проверяем localStorage
         const authStorage = localStorage.getItem('auth-storage')
         if (authStorage) {
@@ -48,7 +51,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } else {
           // localStorage пустой, но может быть cookie
           const cookieUser = Cookies.get('auth-user')
-          const cookieToken = Cookies.get('access-token')
           
           if (cookieUser && !user) {
             // Очищаем устаревший cookie без localStorage
@@ -60,10 +62,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.error('❌ Auth initialization error:', error)
         // Очищаем поврежденные данные
         clearAuth()
+      } finally {
+        // Помечаем как инициализированный в любом случае
+        setIsInitialized(true)
+        console.log('✅ AuthProvider initialization complete')
       }
     }
 
-    // Запускаем инициализацию
+    // Запускаем инициализацию синхронно
     initAuth()
 
     // Слушаем изменения в других вкладках
@@ -84,6 +90,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener('storage', handleStorageChange)
     return () => window.removeEventListener('storage', handleStorageChange)
   }, [setAuth, clearAuth, user])
+
+  // Показываем детей только после инициализации
+  if (!isInitialized) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
+          <p className="text-gray-600">Initializing...</p>
+        </div>
+      </div>
+    )
+  }
 
   return <>{children}</>
 }
