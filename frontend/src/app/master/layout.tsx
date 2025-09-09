@@ -8,11 +8,14 @@ import { useAuthStore } from '@/lib/store'
 import {
   LayoutDashboard,
   Calendar,
+  Users,
   User,
   Settings,
   LogOut,
   Menu,
-  X
+  X,
+  Clock,
+  BarChart3
 } from 'lucide-react'
 
 interface MasterLayoutProps {
@@ -28,7 +31,9 @@ export default function MasterLayout({ children }: MasterLayoutProps) {
 
   const navigation = [
     { name: 'Dashboard', href: '/master', icon: LayoutDashboard },
-    { name: 'My Schedule', href: '/master/schedule', icon: Calendar },
+    { name: 'Schedule', href: '/master/schedule', icon: Calendar },
+    { name: 'Bookings', href: '/master/bookings', icon: Calendar },
+    { name: 'Clients', href: '/master/clients', icon: Users },
     { name: 'Profile', href: '/master/profile', icon: User },
     { name: 'Settings', href: '/master/settings', icon: Settings },
   ]
@@ -37,14 +42,14 @@ export default function MasterLayout({ children }: MasterLayoutProps) {
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsInitialized(true)
-    }, 100) // Небольшая задержка чтобы AuthProvider успел отработать
+    }, 100)
 
     return () => clearTimeout(timer)
   }, [])
 
   // Защита роута - проверяем роль пользователя только после инициализации
   useEffect(() => {
-    if (!isInitialized) return // Ждём инициализации
+    if (!isInitialized) return
 
     console.log('🔍 Master layout checking auth after init. User:', user)
 
@@ -114,9 +119,13 @@ export default function MasterLayout({ children }: MasterLayoutProps) {
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
+        {/* Logo */}
         <div className="flex h-16 items-center justify-between px-6 border-b">
-          <Link href="/master" className="text-xl font-bold">
-            Jazyl
+          <Link href="/master" className="flex items-center space-x-2">
+            <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+              <span className="text-white font-bold text-sm">J</span>
+            </div>
+            <span className="text-xl font-bold">Jazyl</span>
           </Link>
           <Button
             variant="ghost"
@@ -128,39 +137,72 @@ export default function MasterLayout({ children }: MasterLayoutProps) {
           </Button>
         </div>
 
+        {/* Navigation */}
         <nav className="flex-1 space-y-1 px-3 py-4">
           {navigation.map((item) => {
-            const isActive = pathname === item.href
+            const isActive = pathname === item.href || 
+              (item.href !== '/master' && pathname.startsWith(item.href))
+            
             return (
               <Link
                 key={item.name}
                 href={item.href}
                 className={`flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
                   isActive
-                    ? 'bg-gray-100 text-gray-900'
+                    ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-500'
                     : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                 }`}
               >
-                <item.icon className="mr-3 h-5 w-5" />
+                <item.icon className={`mr-3 h-5 w-5 ${
+                  isActive ? 'text-blue-500' : 'text-gray-400'
+                }`} />
                 {item.name}
               </Link>
             )
           })}
         </nav>
 
+        {/* Quick Actions */}
+        <div className="border-t px-3 py-4">
+          <div className="space-y-1">
+            <Button asChild variant="ghost" className="w-full justify-start" size="sm">
+              <Link href="/master/schedule">
+                <Clock className="mr-3 h-4 w-4 text-gray-400" />
+                <span className="text-sm">Today's Schedule</span>
+              </Link>
+            </Button>
+            <Button asChild variant="ghost" className="w-full justify-start" size="sm">
+              <Link href="/master/bookings">
+                <BarChart3 className="mr-3 h-4 w-4 text-gray-400" />
+                <span className="text-sm">View Stats</span>
+              </Link>
+            </Button>
+          </div>
+        </div>
+
+        {/* User Profile Section */}
         <div className="border-t p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center">
+              <div className="w-8 h-8 bg-gradient-to-br from-green-400 to-blue-500 rounded-full flex items-center justify-center">
+                <span className="text-white font-medium text-sm">
+                  {user?.first_name?.charAt(0) || 'M'}
+                </span>
+              </div>
               <div className="ml-3">
                 <p className="text-sm font-medium">{user?.first_name} {user?.last_name}</p>
                 <p className="text-xs text-gray-500">{user?.email}</p>
-                <p className="text-xs text-gray-400">Master</p>
+                <div className="flex items-center gap-1 mt-1">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <span className="text-xs text-gray-400">Master</span>
+                </div>
               </div>
             </div>
             <Button
               variant="ghost"
               size="icon"
               onClick={handleLogout}
+              className="text-gray-500 hover:text-red-500"
             >
               <LogOut className="h-4 w-4" />
             </Button>
@@ -180,7 +222,36 @@ export default function MasterLayout({ children }: MasterLayoutProps) {
           >
             <Menu className="h-5 w-5" />
           </Button>
-          <h1 className="text-lg font-semibold">Master Dashboard</h1>
+          
+          {/* Breadcrumb */}
+          <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+            <Link href="/master" className="hover:text-gray-900">
+              Master
+            </Link>
+            {pathname !== '/master' && (
+              <>
+                <span>/</span>
+                <span className="text-gray-900 capitalize">
+                  {pathname.split('/').pop()?.replace('-', ' ')}
+                </span>
+              </>
+            )}
+          </div>
+
+          <div className="ml-auto flex items-center gap-4">
+            {/* Status indicator */}
+            <div className="hidden md:flex items-center gap-2 text-sm">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              <span className="text-muted-foreground">Online</span>
+            </div>
+
+            {/* Quick access to profile */}
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/master/profile">
+                <User className="h-4 w-4" />
+              </Link>
+            </Button>
+          </div>
         </div>
 
         {/* Page content */}
