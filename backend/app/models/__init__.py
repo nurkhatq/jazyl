@@ -22,4 +22,7 @@ __all__ = [
     "BlockTime",
     "Notification",
     "NotificationTemplate",
+    "PermissionRequestStatus",
+    "PermissionRequestType",
+    "PermissionRequest",
 ]
