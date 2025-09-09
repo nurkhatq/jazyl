@@ -15,11 +15,7 @@ from app.database import Base
 from app.config import settings
 
 # Import all models to ensure they're registered with Base
-from app.models import (
-    Tenant, User, Master, MasterSchedule, MasterService,
-    Service, ServiceCategory, Booking, Client, BlockTime,
-    Notification, NotificationTemplate
-)
+from app.models import *
 
 # this is the Alembic Config object
 config = context.config
