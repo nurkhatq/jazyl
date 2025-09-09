@@ -32,6 +32,8 @@ export const useAuthStore = create<AuthState>()(
       accessToken: null,
       refreshToken: null,
       setAuth: (accessToken, refreshToken, user) => {
+        console.log('🔄 Setting auth for user:', user.email, 'role:', user.role)
+        
         // ИСПРАВЛЕНО: Сохраняем в cookies с правильным именем для middleware
         Cookies.set('auth-user', JSON.stringify(user), { 
           expires: 7,
@@ -46,13 +48,21 @@ export const useAuthStore = create<AuthState>()(
           secure: process.env.NODE_ENV === 'production'
         })
         
+        console.log('✅ Cookies set:', {
+          'auth-user': JSON.stringify(user),
+          'access-token': accessToken.substring(0, 20) + '...'
+        })
+        
         set({ accessToken, refreshToken, user })
       },
       clearAuth: () => {
+        console.log('🧹 Clearing auth')
+        
         // ИСПРАВЛЕНО: Удаляем все cookies с правильными именами
         Cookies.remove('auth-user')
-        Cookies.remove('access-token')
+        Cookies.remove('access-token') 
         Cookies.remove('auth-storage')
+        Cookies.remove('auth-data') // Удаляем старый cookie если есть
         
         set({ user: null, accessToken: null, refreshToken: null })
       },
@@ -68,18 +78,27 @@ export const useAuthStore = create<AuthState>()(
               try {
                 const parsed = JSON.parse(value)
                 if (parsed?.state?.user) {
-                  Cookies.set('auth-user', JSON.stringify(parsed.state.user), {
-                    expires: 7,
-                    sameSite: 'lax',
-                    secure: process.env.NODE_ENV === 'production'
-                  })
-                  
-                  if (parsed?.state?.accessToken) {
-                    Cookies.set('access-token', parsed.state.accessToken, {
+                  // Проверяем, есть ли правильный cookie
+                  const existingCookie = Cookies.get('auth-user')
+                  if (!existingCookie) {
+                    console.log('🔄 Restoring auth-user cookie from localStorage')
+                    Cookies.set('auth-user', JSON.stringify(parsed.state.user), {
                       expires: 7,
                       sameSite: 'lax',
                       secure: process.env.NODE_ENV === 'production'
                     })
+                  }
+                  
+                  if (parsed?.state?.accessToken) {
+                    const existingToken = Cookies.get('access-token')
+                    if (!existingToken) {
+                      console.log('🔄 Restoring access-token cookie from localStorage')
+                      Cookies.set('access-token', parsed.state.accessToken, {
+                        expires: 7,
+                        sameSite: 'lax',
+                        secure: process.env.NODE_ENV === 'production'
+                      })
+                    }
                   }
                 }
               } catch (e) {
@@ -94,6 +113,7 @@ export const useAuthStore = create<AuthState>()(
             try {
               const parsed = JSON.parse(value)
               if (parsed?.state?.user) {
+                console.log('🔄 Syncing auth-user cookie from localStorage write')
                 Cookies.set('auth-user', JSON.stringify(parsed.state.user), {
                   expires: 7,
                   sameSite: 'lax',
@@ -101,6 +121,7 @@ export const useAuthStore = create<AuthState>()(
                 })
                 
                 if (parsed?.state?.accessToken) {
+                  console.log('🔄 Syncing access-token cookie from localStorage write')
                   Cookies.set('access-token', parsed.state.accessToken, {
                     expires: 7,
                     sameSite: 'lax',
@@ -116,6 +137,7 @@ export const useAuthStore = create<AuthState>()(
             localStorage.removeItem(name)
             Cookies.remove('auth-user')
             Cookies.remove('access-token')
+            Cookies.remove('auth-data') // Remove old cookie
           }
         }
       })
