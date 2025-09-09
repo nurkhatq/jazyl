@@ -6,14 +6,13 @@ import { usePathname, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { useAuthStore } from '@/lib/store'
 import {
+  LayoutDashboard,
   Calendar,
-  Clock,
-  Users,
   User,
+  Settings,
   LogOut,
   Menu,
-  X,
-  Home
+  X
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -27,28 +26,56 @@ export default function MasterLayout({ children }: MasterLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { user, clearAuth } = useAuthStore()
 
-  useEffect(() => {
-    // Проверяем, что пользователь - мастер
-    if (!user || user.role !== 'master') {
-      router.push('/login')
-    }
-  }, [user, router])
-
   const navigation = [
-    { name: 'Dashboard', href: '/master', icon: Home },
+    { name: 'Dashboard', href: '/master', icon: LayoutDashboard },
     { name: 'My Schedule', href: '/master/schedule', icon: Calendar },
-    { name: 'My Bookings', href: '/master/bookings', icon: Clock },
-    { name: 'My Clients', href: '/master/clients', icon: Users },
     { name: 'Profile', href: '/master/profile', icon: User },
+    { name: 'Settings', href: '/master/settings', icon: Settings },
   ]
 
+  // Защита роута - проверяем роль пользователя
+  useEffect(() => {
+    if (!user) {
+      console.log('❌ No user found in master layout, redirecting to login')
+      router.push('/login')
+      return
+    }
+
+    if (user.role !== 'master') {
+      console.log('❌ User is not a master in layout, role:', user.role)
+      switch (user.role) {
+        case 'owner':
+        case 'admin':
+          router.push('/dashboard')
+          break
+        case 'client':
+          router.push('/profile')
+          break
+        default:
+          router.push('/login')
+      }
+      return
+    }
+
+    console.log('✅ Master layout access granted for:', user.email)
+  }, [user, router])
+
   const handleLogout = () => {
+    console.log('🔄 Master logging out')
     clearAuth()
     router.push('/login')
   }
 
+  // Показываем загрузку пока проверяем права доступа
   if (!user || user.role !== 'master') {
-    return null
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -69,7 +96,7 @@ export default function MasterLayout({ children }: MasterLayoutProps) {
       >
         <div className="flex h-16 items-center justify-between px-6 border-b">
           <Link href="/master" className="text-xl font-bold">
-            Jazyl Master
+            Jazyl
           </Link>
           <Button
             variant="ghost"

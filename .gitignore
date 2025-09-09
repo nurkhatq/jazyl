@@ -40,7 +40,7 @@ htmlcov/
 .tox/
 .hypothesis/
 *.log
-
+переходксерверу
 # Node
 node_modules/
 .next/

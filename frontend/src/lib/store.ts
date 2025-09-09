@@ -9,6 +9,12 @@ interface User {
   last_name: string
   role: string
   tenant_id: string
+  phone?: string
+  is_active?: boolean
+  is_verified?: boolean
+  created_at?: string
+  updated_at?: string
+  last_login?: string
 }
 
 interface AuthState {
@@ -19,49 +25,6 @@ interface AuthState {
   clearAuth: () => void
 }
 
-// Custom storage для синхронизации с cookies
-const cookieStorage = {
-  getItem: (name: string) => {
-    // Читаем из localStorage для клиента
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem(name)
-    }
-    return null
-  },
-  setItem: (name: string, value: string) => {
-    // Сохраняем в localStorage
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(name, value)
-      
-      // Также сохраняем критичные данные в cookies для middleware
-      try {
-        const data = JSON.parse(value)
-        if (data.state?.user) {
-          // Сохраняем минимальную информацию в cookie для проверки на сервере
-          Cookies.set('auth-user', JSON.stringify({
-            role: data.state.user.role,
-            id: data.state.user.id,
-            email: data.state.user.email
-          }), { 
-            expires: 7,
-            sameSite: 'lax',
-            secure: process.env.NODE_ENV === 'production'
-          })
-        }
-      } catch (e) {
-        console.error('Error setting auth cookie:', e)
-      }
-    }
-  },
-  removeItem: (name: string) => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(name)
-      // Удаляем cookie при logout
-      Cookies.remove('auth-user')
-    }
-  },
-}
-
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
@@ -69,9 +32,16 @@ export const useAuthStore = create<AuthState>()(
       accessToken: null,
       refreshToken: null,
       setAuth: (accessToken, refreshToken, user) => {
-        // Сохраняем токен в cookie для API запросов
-        Cookies.set('access-token', accessToken, { 
-          expires: 1/48, // 30 минут
+        // ИСПРАВЛЕНО: Сохраняем в cookies с правильным именем для middleware
+        Cookies.set('auth-user', JSON.stringify(user), { 
+          expires: 7,
+          sameSite: 'lax',
+          secure: process.env.NODE_ENV === 'production'
+        })
+        
+        // Также сохраняем токен отдельно для API
+        Cookies.set('access-token', accessToken, {
+          expires: 7,
           sameSite: 'lax',
           secure: process.env.NODE_ENV === 'production'
         })
@@ -79,16 +49,76 @@ export const useAuthStore = create<AuthState>()(
         set({ accessToken, refreshToken, user })
       },
       clearAuth: () => {
-        // Удаляем все cookies
-        Cookies.remove('access-token')
+        // ИСПРАВЛЕНО: Удаляем все cookies с правильными именами
         Cookies.remove('auth-user')
+        Cookies.remove('access-token')
+        Cookies.remove('auth-storage')
         
         set({ user: null, accessToken: null, refreshToken: null })
       },
     }),
     {
       name: 'auth-storage',
-      storage: createJSONStorage(() => cookieStorage),
+      storage: createJSONStorage(() => {
+        return {
+          getItem: (name) => {
+            const value = localStorage.getItem(name)
+            // ИСПРАВЛЕНО: Синхронизируем с cookies при чтении
+            if (value) {
+              try {
+                const parsed = JSON.parse(value)
+                if (parsed?.state?.user) {
+                  Cookies.set('auth-user', JSON.stringify(parsed.state.user), {
+                    expires: 7,
+                    sameSite: 'lax',
+                    secure: process.env.NODE_ENV === 'production'
+                  })
+                  
+                  if (parsed?.state?.accessToken) {
+                    Cookies.set('access-token', parsed.state.accessToken, {
+                      expires: 7,
+                      sameSite: 'lax',
+                      secure: process.env.NODE_ENV === 'production'
+                    })
+                  }
+                }
+              } catch (e) {
+                console.error('Failed to sync auth to cookies:', e)
+              }
+            }
+            return value
+          },
+          setItem: (name, value) => {
+            localStorage.setItem(name, value)
+            // ИСПРАВЛЕНО: Синхронизируем с cookies при записи
+            try {
+              const parsed = JSON.parse(value)
+              if (parsed?.state?.user) {
+                Cookies.set('auth-user', JSON.stringify(parsed.state.user), {
+                  expires: 7,
+                  sameSite: 'lax',
+                  secure: process.env.NODE_ENV === 'production'
+                })
+                
+                if (parsed?.state?.accessToken) {
+                  Cookies.set('access-token', parsed.state.accessToken, {
+                    expires: 7,
+                    sameSite: 'lax',
+                    secure: process.env.NODE_ENV === 'production'
+                  })
+                }
+              }
+            } catch (e) {
+              console.error('Failed to sync auth to cookies:', e)
+            }
+          },
+          removeItem: (name) => {
+            localStorage.removeItem(name)
+            Cookies.remove('auth-user')
+            Cookies.remove('access-token')
+          }
+        }
+      })
     }
   )
 )
