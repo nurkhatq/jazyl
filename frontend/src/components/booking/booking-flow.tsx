@@ -13,7 +13,7 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { Loader2, CheckCircle } from 'lucide-react'
 
 interface BookingFlowProps {
-  tenantId: string
+  tenantId?: string // Сделаем опциональным, так как теперь может определяться автоматически
   preselectedMaster?: any
   preselectedService?: any
 }
@@ -39,38 +39,49 @@ export function BookingFlow({ tenantId, preselectedMaster, preselectedService }:
     }
   }, [preselectedMaster, preselectedService])
 
-  const { data: masters } = useQuery({
+  // Загружаем мастеров
+  const { data: masters, isLoading: mastersLoading } = useQuery({
     queryKey: ['masters', tenantId],
     queryFn: () => getMasters(tenantId),
+    staleTime: 5 * 60 * 1000, // 5 минут
   })
 
-  const { data: services } = useQuery({
+  // Загружаем услуги
+  const { data: services, isLoading: servicesLoading } = useQuery({
     queryKey: ['services', tenantId],
     queryFn: () => getServices(tenantId),
+    staleTime: 5 * 60 * 1000, // 5 минут
   })
 
+  // Загружаем доступные слоты (ИСПРАВЛЕНО)
   const { data: availableSlots, isLoading: slotsLoading } = useQuery({
-    queryKey: ['availableSlots', selectedMaster, selectedDate, selectedService],
-    queryFn: () => 
-      selectedMaster && selectedDate && selectedService
-        ? getAvailableSlots(tenantId, selectedMaster, selectedDate, selectedService)
-        : Promise.resolve([]),
+    queryKey: ['availableSlots', selectedMaster, selectedDate, selectedService, tenantId],
+    queryFn: () => {
+      if (!selectedMaster || !selectedDate || !selectedService) {
+        return Promise.resolve({ slots: [] })
+      }
+      // ИСПРАВЛЕНО: используем правильную сигнатуру функции
+      return getAvailableSlots(selectedMaster, selectedDate, selectedService, tenantId)
+    },
     enabled: !!selectedMaster && !!selectedDate && !!selectedService,
+    staleTime: 1 * 60 * 1000, // 1 минута для слотов
   })
 
+  // Мутация для создания брони
   const bookingMutation = useMutation({
-    mutationFn: (data: any) => createBooking(tenantId, data),
-    onSuccess: () => {
+    mutationFn: (data: any) => createBooking(data, tenantId),
+    onSuccess: (data) => {
       setBookingComplete(true)
       toast({
         title: "Booking Created!",
         description: "Please check your email to confirm your booking.",
       })
     },
-    onError: () => {
+    onError: (error: any) => {
+      console.error('Booking error:', error)
       toast({
         title: "Booking Failed",
-        description: "Something went wrong. Please try again.",
+        description: error.response?.data?.detail || "Something went wrong. Please try again.",
         variant: "destructive",
       })
     },
@@ -86,6 +97,18 @@ export function BookingFlow({ tenantId, preselectedMaster, preselectedService }:
       return
     }
 
+    // Валидация email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(clientData.email)) {
+      toast({
+        title: "Invalid Email",
+        description: "Please enter a valid email address.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // Формируем данные для отправки (исправлено под новую схему API)
     const bookingData = {
       master_id: selectedMaster,
       service_id: selectedService,
@@ -96,6 +119,17 @@ export function BookingFlow({ tenantId, preselectedMaster, preselectedService }:
     }
 
     bookingMutation.mutate(bookingData)
+  }
+
+  // Функция для сброса формы
+  const resetForm = () => {
+    setBookingComplete(false)
+    setStep(1)
+    setSelectedMaster(preselectedMaster?.id || null)
+    setSelectedService(preselectedService?.id || null)
+    setSelectedTime(null)
+    setSelectedDate(new Date())
+    setClientData({ name: '', email: '', phone: '' })
   }
 
   // Показываем успешное завершение
@@ -112,16 +146,23 @@ export function BookingFlow({ tenantId, preselectedMaster, preselectedService }:
             <p className="text-sm text-gray-500 mb-6">
               Please check your email and confirm your booking to complete the reservation.
             </p>
-            <Button onClick={() => {
-              setBookingComplete(false)
-              setStep(1)
-              setSelectedMaster(null)
-              setSelectedService(null)
-              setSelectedTime(null)
-              setClientData({ name: '', email: '', phone: '' })
-            }}>
+            <Button onClick={resetForm}>
               Book Another Appointment
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  // Показываем загрузку если данные еще загружаются
+  if (mastersLoading || servicesLoading) {
+    return (
+      <Card className="max-w-2xl mx-auto">
+        <CardContent className="pt-6">
+          <div className="flex justify-center py-8">
+            <Loader2 className="h-8 w-8 animate-spin" />
+            <span className="ml-2">Loading...</span>
           </div>
         </CardContent>
       </Card>
@@ -169,7 +210,7 @@ export function BookingFlow({ tenantId, preselectedMaster, preselectedService }:
               disabled={(date) => {
                 const today = new Date()
                 today.setHours(0, 0, 0, 0)
-                return date < today || date.getDay() === 0
+                return date < today || date.getDay() === 0 // Отключаем прошлые даты и воскресенья
               }}
               className="rounded-md border"
             />
@@ -205,16 +246,30 @@ export function BookingFlow({ tenantId, preselectedMaster, preselectedService }:
                       className={`p-4 border rounded-lg cursor-pointer transition-colors
                         ${selectedMaster === master.id ? 'border-primary bg-primary/10' : 'hover:border-primary/50'}`}
                     >
-                      <div className="font-semibold">{master.display_name}</div>
-                      <div className="text-sm text-muted-foreground">
-                        {master.specialization?.join(', ')}
+                      <div className="flex flex-col items-center text-center">
+                        {master.photo_url && (
+                          <img 
+                            src={master.photo_url} 
+                            alt={master.display_name}
+                            className="w-16 h-16 rounded-full object-cover mb-2"
+                          />
+                        )}
+                        <div className="font-semibold">{master.display_name}</div>
+                        <div className="text-sm text-muted-foreground">
+                          {master.specialization?.join(', ')}
+                        </div>
+                        {master.rating > 0 && (
+                          <div className="text-sm mt-1">⭐ {master.rating.toFixed(1)}</div>
+                        )}
                       </div>
-                      {master.rating > 0 && (
-                        <div className="text-sm mt-1">⭐ {master.rating}</div>
-                      )}
                     </div>
                   ))}
                 </div>
+                {!masters?.length && (
+                  <div className="text-center py-4 text-muted-foreground">
+                    No masters available
+                  </div>
+                )}
               </div>
             )}
 
@@ -233,6 +288,11 @@ export function BookingFlow({ tenantId, preselectedMaster, preselectedService }:
                       <div className="flex justify-between items-start">
                         <div>
                           <div className="font-semibold">{service.name}</div>
+                          {service.description && (
+                            <div className="text-sm text-muted-foreground mb-2">
+                              {service.description}
+                            </div>
+                          )}
                           <div className="text-sm text-muted-foreground">
                             {service.duration} min
                           </div>
@@ -242,6 +302,11 @@ export function BookingFlow({ tenantId, preselectedMaster, preselectedService }:
                     </div>
                   ))}
                 </div>
+                {!services?.length && (
+                  <div className="text-center py-4 text-muted-foreground">
+                    No services available
+                  </div>
+                )}
               </div>
             )}
 
@@ -250,13 +315,23 @@ export function BookingFlow({ tenantId, preselectedMaster, preselectedService }:
               <div className="p-4 bg-primary/10 rounded-lg">
                 <Label>Selected Master</Label>
                 <p className="font-semibold">{preselectedMaster.display_name}</p>
+                {preselectedMaster.specialization?.length > 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    {preselectedMaster.specialization.join(', ')}
+                  </p>
+                )}
               </div>
             )}
             
             {preselectedService && (
               <div className="p-4 bg-primary/10 rounded-lg">
                 <Label>Selected Service</Label>
-                <p className="font-semibold">{preselectedService.name} - ${preselectedService.price}</p>
+                <p className="font-semibold">
+                  {preselectedService.name} - ${preselectedService.price}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {preselectedService.duration} minutes
+                </p>
               </div>
             )}
           </CardContent>
@@ -287,6 +362,7 @@ export function BookingFlow({ tenantId, preselectedMaster, preselectedService }:
             {slotsLoading ? (
               <div className="flex justify-center py-8">
                 <Loader2 className="h-8 w-8 animate-spin" />
+                <span className="ml-2">Loading available times...</span>
               </div>
             ) : (
               <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
@@ -302,7 +378,7 @@ export function BookingFlow({ tenantId, preselectedMaster, preselectedService }:
                 ))}
                 {(!availableSlots?.slots || availableSlots.slots.length === 0) && (
                   <div className="col-span-full text-center py-8 text-muted-foreground">
-                    No available time slots for this date
+                    No available time slots for this date. Please select a different date.
                   </div>
                 )}
               </div>
@@ -331,7 +407,7 @@ export function BookingFlow({ tenantId, preselectedMaster, preselectedService }:
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <Label htmlFor="name">Full Name</Label>
+              <Label htmlFor="name">Full Name *</Label>
               <Input
                 id="name"
                 value={clientData.name}
@@ -341,7 +417,7 @@ export function BookingFlow({ tenantId, preselectedMaster, preselectedService }:
               />
             </div>
             <div>
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">Email *</Label>
               <Input
                 id="email"
                 type="email"
@@ -352,7 +428,7 @@ export function BookingFlow({ tenantId, preselectedMaster, preselectedService }:
               />
             </div>
             <div>
-              <Label htmlFor="phone">Phone Number</Label>
+              <Label htmlFor="phone">Phone Number *</Label>
               <Input
                 id="phone"
                 type="tel"
@@ -369,10 +445,10 @@ export function BookingFlow({ tenantId, preselectedMaster, preselectedService }:
               <div className="space-y-1 text-sm">
                 <div>Date: {selectedDate && format(selectedDate, 'MMMM d, yyyy')}</div>
                 <div>Time: {selectedTime}</div>
-                <div>Master: {masters?.find((m: any) => m.id === selectedMaster)?.display_name}</div>
-                <div>Service: {services?.find((s: any) => s.id === selectedService)?.name}</div>
+                <div>Master: {masters?.find((m: any) => m.id === selectedMaster)?.display_name || preselectedMaster?.display_name}</div>
+                <div>Service: {services?.find((s: any) => s.id === selectedService)?.name || preselectedService?.name}</div>
                 <div className="font-semibold pt-2">
-                  Total: ${services?.find((s: any) => s.id === selectedService)?.price}
+                  Total: ${services?.find((s: any) => s.id === selectedService)?.price || preselectedService?.price}
                 </div>
               </div>
             </div>
@@ -388,7 +464,7 @@ export function BookingFlow({ tenantId, preselectedMaster, preselectedService }:
               {bookingMutation.isPending ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Booking...
+                  Creating Booking...
                 </>
               ) : (
                 'Complete Booking'
