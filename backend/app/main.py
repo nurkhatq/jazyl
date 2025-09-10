@@ -13,7 +13,7 @@ from app.config import settings
 from app.database import engine, Base
 from app.api import auth, tenants, bookings, masters, services, clients, dashboard
 from app.utils.logger import setup_logging
-from app.utils.middleware import TenantMiddleware, LoggingMiddleware, URLFixMiddleware
+from app.utils.middleware import TenantMiddleware, LoggingMiddleware
 from app.utils.exceptions import CustomException
 import os
 
@@ -56,8 +56,8 @@ app.add_middleware(
     allowed_hosts=settings.ALLOWED_HOSTS,
 )
 
-# Сначала URL fixing
-app.add_middleware(URLFixMiddleware)
+# УДАЛЯЕМ URLFixMiddleware - он вызывает проблемы с redirects
+# Вместо этого будем правильно определять пути в роутах
 
 # Потом logging
 app.add_middleware(LoggingMiddleware)
@@ -86,7 +86,7 @@ async def health_check():
         "service": "jazyl-backend"
     }
 
-# Include routers
+# Include routers БЕЗ trailing slash
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(tenants.router, prefix="/api/tenants", tags=["Tenants"])
 app.include_router(bookings.router, prefix="/api/bookings", tags=["Bookings"])

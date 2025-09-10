@@ -7,8 +7,8 @@ from datetime import date, datetime
 
 from app.database import get_db
 from app.models.user import User, UserRole
-from app.models.master import Master
-from app.schemas.master import MasterUpdate, MasterResponse, MasterPermissionsUpdate
+from app.models.master import Master, MasterSchedule
+from app.schemas.master import MasterUpdate, MasterResponse, MasterPermissionsUpdate, MasterCreate
 from app.models.permission_request import PermissionRequestType
 from app.services.master import MasterService
 from app.services.file_upload import FileUploadService
@@ -54,6 +54,86 @@ async def get_masters(
     masters = result.scalars().all()
     
     return masters
+
+# Добавьте этот эндпоинт в ваш masters.py после существующих эндпоинтов
+
+@router.post("/", response_model=MasterResponse)
+async def create_master(
+    master_data: MasterCreate,
+    request: Request,
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_db)
+):
+    """Создать нового мастера (только для владельцев/админов)"""
+    tenant_id = await get_current_tenant(request, db)
+    
+    # Проверяем что создатель из того же тенанта
+    if current_user.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+    
+    # Проверяем что пользователь существует (если указан user_id)
+    if master_data.user_id:
+        result = await db.execute(
+            select(User).where(
+                and_(
+                    User.id == master_data.user_id,
+                    User.tenant_id == tenant_id,
+                    User.role == UserRole.MASTER
+                )
+            )
+        )
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Master user not found in this tenant"
+            )
+    
+    # Создаем нового мастера
+    master = Master(
+        tenant_id=tenant_id,
+        user_id=master_data.user_id,
+        display_name=master_data.display_name,
+        description=master_data.description,
+        photo_url=master_data.photo_url,
+        specialization=master_data.specialization,
+        experience_years=0,
+        rating=0.0,
+        reviews_count=0,
+        is_active=True,
+        is_visible=True,
+        # Права по умолчанию
+        can_edit_profile=True,
+        can_edit_schedule=False,
+        can_edit_services=False,
+        can_manage_bookings=True,
+        can_view_analytics=True,
+        can_upload_photos=True
+    )
+    
+    db.add(master)
+    await db.commit()
+    await db.refresh(master)
+    
+    # Создаем расписание если указано
+    if master_data.schedules:
+        for schedule_data in master_data.schedules:
+            schedule = MasterSchedule(
+                master_id=master.id,
+                day_of_week=schedule_data.day_of_week,
+                start_time=schedule_data.start_time,
+                end_time=schedule_data.end_time,
+                is_working=schedule_data.is_working
+            )
+            db.add(schedule)
+        
+        await db.commit()
+    
+    return master
 
 @router.get("/{master_id}", response_model=MasterResponse)
 async def get_master(
