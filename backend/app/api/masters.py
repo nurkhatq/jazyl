@@ -5,6 +5,11 @@ from typing import List, Optional
 from uuid import UUID
 from datetime import date, datetime
 
+from app.schemas.user import UserCreate
+from app.services.auth import AuthService
+import secrets
+import string
+
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.models.master import Master, MasterSchedule
@@ -57,9 +62,8 @@ async def get_masters(
     return masters
 
 # Добавьте этот эндпоинт в ваш masters.py после существующих эндпоинтов
-
-@router.post("", response_model=MasterResponse)  # БЕЗ слеша  
-@router.post("/", response_model=MasterResponse, include_in_schema=False)  # Со слешем
+@router.post("", response_model=MasterResponse)
+@router.post("/", response_model=MasterResponse, include_in_schema=False)
 async def create_master(
     master_data: MasterCreate,
     request: Request,
@@ -76,12 +80,48 @@ async def create_master(
             detail="Access denied"
         )
     
-    # Проверяем что пользователь существует (если указан user_id)
-    if master_data.user_id:
+    user_id = master_data.user_id
+    
+    # Если user_id не указан, создаем нового пользователя
+    if not user_id and master_data.user_email:
+        # Проверяем что email не занят
+        result = await db.execute(
+            select(User).where(User.email == master_data.user_email)
+        )
+        existing_user = result.scalar_one_or_none()
+        
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User with this email already exists"
+            )
+        
+        # Генерируем временный пароль
+        temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
+        
+        # Создаем пользователя
+        auth_service = AuthService(db)
+        user_data = UserCreate(
+            email=master_data.user_email,
+            first_name=master_data.user_first_name or "Master",
+            last_name=master_data.user_last_name or "",
+            phone=master_data.user_phone,
+            password=temp_password,
+            tenant_id=tenant_id,
+            role=UserRole.MASTER
+        )
+        
+        new_user = await auth_service.create_user(user_data)
+        user_id = new_user.id
+        
+        # TODO: Отправить email с паролем и инструкциями по входу
+        
+    elif user_id:
+        # Проверяем что пользователь существует и является мастером
         result = await db.execute(
             select(User).where(
                 and_(
-                    User.id == master_data.user_id,
+                    User.id == user_id,
                     User.tenant_id == tenant_id,
                     User.role == UserRole.MASTER
                 )
@@ -94,11 +134,16 @@ async def create_master(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Master user not found in this tenant"
             )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Either user_id or user_email must be provided"
+        )
     
-    # Создаем нового мастера
+    # Создаем профиль мастера
     master = Master(
         tenant_id=tenant_id,
-        user_id=master_data.user_id,
+        user_id=user_id,
         display_name=master_data.display_name,
         description=master_data.description,
         photo_url=master_data.photo_url,

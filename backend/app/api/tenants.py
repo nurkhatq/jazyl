@@ -11,6 +11,7 @@ from app.models.user import UserRole
 
 router = APIRouter()
 
+@router.post("", response_model=TenantResponse)
 @router.post("/", response_model=TenantResponse)
 async def create_tenant(
     tenant_data: TenantCreate,

@@ -43,6 +43,7 @@ async def get_current_user_optional(
 
 
 # --- CRUD Services ---
+@router.post("", response_model=ServiceResponse)
 @router.post("/", response_model=ServiceResponse)
 async def create_service(
     service_data: ServiceCreate,
@@ -53,6 +54,7 @@ async def create_service(
     new_service = await service.create_service(current_user.tenant_id, service_data)
     return new_service
 
+@router.get("", response_model=List[ServiceResponse])
 @router.get("/", response_model=List[ServiceResponse])
 async def get_services(
     request: Request,

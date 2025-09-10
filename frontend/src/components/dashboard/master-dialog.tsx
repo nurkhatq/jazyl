@@ -58,7 +58,8 @@ export function MasterDialog({ open, onOpenChange, master }: MasterDialogProps) 
     mutationFn: (data: any) =>
       master
         ? updateMaster(master.id, data)
-        : createMaster(user?.tenant_id || '', data),
+        // ИСПРАВЛЕНО: правильный порядок параметров - сначала data, потом tenantId
+        : createMaster(data, user?.tenant_id),
     onSuccess: () => {
       toast({
         title: master ? 'Master Updated' : 'Master Created',

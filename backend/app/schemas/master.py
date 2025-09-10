@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from uuid import UUID
@@ -11,7 +11,6 @@ class MasterPermissions(BaseModel):
     can_view_analytics: bool = True
     can_upload_photos: bool = True
 
-
 class MasterScheduleSchema(BaseModel):
     id: Optional[UUID] = None
     day_of_week: int = Field(..., ge=0, le=6)
@@ -22,7 +21,6 @@ class MasterScheduleSchema(BaseModel):
     class Config:
         from_attributes = True
 
-
 class MasterBase(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
@@ -30,8 +28,14 @@ class MasterBase(BaseModel):
     specialization: List[str] = []
 
 class MasterCreate(MasterBase):
-    user_id: Optional[UUID] = None  # Сделаем опциональным
+    user_id: Optional[UUID] = None
     schedules: List[MasterScheduleSchema] = []
+    
+    # ДОБАВЛЕНО: Поля для создания нового пользователя
+    user_email: Optional[EmailStr] = None
+    user_first_name: Optional[str] = Field(None, max_length=100)
+    user_last_name: Optional[str] = Field(None, max_length=100)
+    user_phone: Optional[str] = Field(None, max_length=20)
 
 class MasterUpdate(BaseModel):
     display_name: Optional[str] = None
@@ -50,7 +54,6 @@ class MasterPermissionsUpdate(BaseModel):
     can_manage_bookings: Optional[bool] = None
     can_view_analytics: Optional[bool] = None
     can_upload_photos: Optional[bool] = None
-
 
 class MasterResponse(BaseModel):
     id: UUID
@@ -80,7 +83,6 @@ class MasterResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# Упрощенная схема для my-profile endpoint
 class MasterProfileResponse(BaseModel):
     id: UUID
     tenant_id: UUID

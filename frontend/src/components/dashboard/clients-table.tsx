@@ -18,7 +18,8 @@ export function ClientsTable({ searchTerm }: ClientsTableProps) {
   
   const { data: clients, isLoading } = useQuery({
     queryKey: ['clients', searchTerm],
-    queryFn: () => getClients(user?.tenant_id || '', searchTerm),
+    // ИСПРАВЛЕНО: правильный порядок параметров - search, потом tenantId
+    queryFn: () => getClients(searchTerm, user?.tenant_id),
     enabled: !!user?.tenant_id,
   })
 
@@ -50,7 +51,7 @@ export function ClientsTable({ searchTerm }: ClientsTableProps) {
               <TableCell>{client.email}</TableCell>
               <TableCell>{client.phone}</TableCell>
               <TableCell>{client.total_visits}</TableCell>
-              <TableCell>${client.total_spent.toFixed(2)}</TableCell>
+              <TableCell>${client.total_spent?.toFixed(2) || '0.00'}</TableCell>
               <TableCell>
                 {client.last_visit
                   ? format(new Date(client.last_visit), 'MMM d, yyyy')
@@ -69,7 +70,7 @@ export function ClientsTable({ searchTerm }: ClientsTableProps) {
           {(!clients || clients.length === 0) && (
             <TableRow>
               <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
-                No clients found
+                {searchTerm ? 'No clients found matching your search' : 'No clients found'}
               </TableCell>
             </TableRow>
           )}

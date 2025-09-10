@@ -11,7 +11,8 @@ from app.models.user import UserRole
 
 router = APIRouter()
 
-@router.post("/", response_model=ClientResponse)
+@router.post("", response_model=ClientResponse)
+@router.post("/", response_model=ClientResponse, include_in_schema=False)
 async def create_client(
     client_data: ClientCreate,
     request: Request,
@@ -26,7 +27,8 @@ async def create_client(
     
     return client
 
-@router.get("/", response_model=List[ClientResponse])
+@router.get("", response_model=List[ClientResponse])
+@router.get("/", response_model=List[ClientResponse], include_in_schema=False)
 async def get_clients(
     request: Request,
     search: Optional[str] = Query(None),

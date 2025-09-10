@@ -49,6 +49,7 @@ async def get_current_user_optional(
         return None
 
 # --- Public endpoint for creating bookings ---
+@router.post("", response_model=BookingResponse)
 @router.post("/", response_model=BookingResponse)
 async def create_booking(
     booking_data: BookingCreate,
@@ -159,6 +160,7 @@ async def get_available_slots(
     return {"slots": slots}
 
 # --- Protected endpoints (требуют авторизации) ---
+@router.get("", response_model=List[BookingResponse])
 @router.get("/", response_model=List[BookingResponse])
 async def get_bookings(
     date_from: Optional[date] = Query(None),
