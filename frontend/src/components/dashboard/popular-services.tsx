@@ -13,9 +13,10 @@ export function PopularServices() {
   const { data: services, isLoading } = useQuery({
     queryKey: ['popular-services'],
     queryFn: async () => {
+      // ИСПРАВЛЕНО: убираем explicit tenant_id - он передается через headers автоматически
       const response = await api.get('/api/dashboard/services/popularity', {
-        params: { limit: 5 },
-        headers: { 'X-Tenant-ID': user?.tenant_id }
+        params: { limit: 5 }
+        // headers уже добавляются автоматически через interceptor
       })
       return response.data
     },
@@ -51,7 +52,7 @@ export function PopularServices() {
       <CardContent>
         <div className="space-y-4">
           {services?.map((service: any, index: number) => (
-            <div key={service.service_id} className="space-y-2">
+            <div key={service.id || service.service_id} className="space-y-2">
               <div className="flex items-center justify-between text-sm">
                 <span className="font-medium">{service.name}</span>
                 <span className="text-muted-foreground">{service.bookings_count} bookings</span>

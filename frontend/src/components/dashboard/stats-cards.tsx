@@ -12,7 +12,8 @@ export function StatsCards() {
   
   const { data: stats, isLoading } = useQuery({
     queryKey: ['dashboard-stats'],
-    queryFn: () => getDashboardStats(user?.tenant_id || ''),
+    // ИСПРАВЛЕНО: убираем tenant_id из параметров - он передается через headers автоматически
+    queryFn: () => getDashboardStats(),
     enabled: !!user?.tenant_id,
   })
 

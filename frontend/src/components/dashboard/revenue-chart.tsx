@@ -12,7 +12,8 @@ export function RevenueChart() {
   
   const { data: revenue, isLoading } = useQuery({
     queryKey: ['revenue-report'],
-    queryFn: () => getRevenueReport(user?.tenant_id || '', 'day'),
+    // ИСПРАВЛЕНО: правильный порядок параметров - сначала period, потом tenant_id (но tenant_id передается через headers)
+    queryFn: () => getRevenueReport('day'),
     enabled: !!user?.tenant_id,
   })
 
@@ -30,7 +31,8 @@ export function RevenueChart() {
     )
   }
 
-  const chartData = revenue?.map((item: any) => ({
+  // ИСПРАВЛЕНО: обработка структуры ответа API
+  const chartData = revenue?.revenue_data?.map((item: any) => ({
     date: new Date(item.period).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     revenue: item.revenue,
     bookings: item.bookings_count,
