@@ -28,7 +28,8 @@ async def get_tenant_id_from_header(request: Request) -> Optional[UUID]:
     return None
 
 # ---------------------- PUBLIC ENDPOINTS для клиентов ----------------------
-@router.get("/", response_model=List[MasterResponse])
+@router.get("", response_model=List[MasterResponse])  # БЕЗ слеша
+@router.get("/", response_model=List[MasterResponse], include_in_schema=False)
 async def get_masters(
     request: Request,
     db: AsyncSession = Depends(get_db)
@@ -57,7 +58,8 @@ async def get_masters(
 
 # Добавьте этот эндпоинт в ваш masters.py после существующих эндпоинтов
 
-@router.post("/", response_model=MasterResponse)
+@router.post("", response_model=MasterResponse)  # БЕЗ слеша  
+@router.post("/", response_model=MasterResponse, include_in_schema=False)  # Со слешем
 async def create_master(
     master_data: MasterCreate,
     request: Request,

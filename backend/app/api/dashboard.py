@@ -28,7 +28,7 @@ async def get_dashboard_stats(
     """Get dashboard statistics"""
     service = DashboardService(db)
     
-    # Get tenant_id from current user или из request
+    # Get tenant_id from current user
     tenant_id = current_user.tenant_id
     if not tenant_id:
         try:
@@ -52,6 +52,7 @@ async def get_dashboard_stats(
             }
         }
     
+    # ИСПРАВЛЕНО: используем правильную сигнатуру
     stats = await service.get_stats(
         tenant_id=tenant_id,
         date_from=date_from,
@@ -61,7 +62,6 @@ async def get_dashboard_stats(
     )
     
     return stats
-
 
 @router.get("/today")
 async def get_today_overview(
@@ -89,17 +89,16 @@ async def get_today_overview(
     
     service = DashboardService(db)
     
+    # ИСПРАВЛЕНО: используем правильную сигнатуру 
     overview = await service.get_today_overview(
-        tenant_id=tenant_id,
-        user_role=current_user.role,
-        user_id=current_user.id
+        tenant_id=tenant_id
     )
     
     return overview
 
 @router.get("/revenue")
 async def get_revenue_report(
-    period: str = Query(..., description="Period: day, week, month, year"),
+    period: str = Query("day", description="Period: day, week, month, year"),
     request: Request = None,
     current_user = Depends(require_role([UserRole.OWNER, UserRole.MASTER])),
     db: AsyncSession = Depends(get_db)
@@ -123,14 +122,16 @@ async def get_revenue_report(
     
     service = DashboardService(db)
     
+    # ИСПРАВЛЕНО: используем правильную сигнатуру без user_role, user_id
     report = await service.get_revenue_report(
         tenant_id=tenant_id,
-        period=period,
-        user_role=current_user.role,
-        user_id=current_user.id
+        period=period
     )
     
-    return report
+    return {
+        "period": period,
+        "revenue_data": report
+    }
 
 @router.get("/services/popularity")
 async def get_popular_services(
@@ -151,41 +152,44 @@ async def get_popular_services(
         return []
     
     # Получаем популярные услуги
-    result = await db.execute(
-        select(
-            Service.id,
-            Service.name,
-            Service.price,
-            Service.duration,
-            func.count(Booking.id).label('bookings_count'),
-            func.sum(Booking.price).label('total_revenue')
-        )
-        .join(Booking, Service.id == Booking.service_id)
-        .where(
-            and_(
-                Service.tenant_id == tenant_id,
-                Service.is_active == True,
-                Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.COMPLETED])
+    try:
+        result = await db.execute(
+            select(
+                Service.id,
+                Service.name,
+                Service.price,
+                Service.duration,
+                func.count(Booking.id).label('bookings_count'),
+                func.sum(Booking.price).label('total_revenue')
             )
+            .join(Booking, Service.id == Booking.service_id, isouter=True)
+            .where(
+                and_(
+                    Service.tenant_id == tenant_id,
+                    Service.is_active == True
+                )
+            )
+            .group_by(Service.id, Service.name, Service.price, Service.duration)
+            .order_by(func.count(Booking.id).desc())
+            .limit(limit)
         )
-        .group_by(Service.id, Service.name, Service.price, Service.duration)
-        .order_by(func.count(Booking.id).desc())
-        .limit(limit)
-    )
-    
-    services = result.all()
-    
-    return [
-        {
-            "id": str(service.id),
-            "name": service.name,
-            "price": float(service.price),
-            "duration": service.duration,
-            "bookings_count": int(service.bookings_count),
-            "total_revenue": float(service.total_revenue or 0)
-        }
-        for service in services
-    ]
+        
+        services = result.all()
+        
+        return [
+            {
+                "id": str(service.id),
+                "name": service.name,
+                "price": float(service.price),
+                "duration": service.duration,
+                "bookings_count": int(service.bookings_count or 0),
+                "total_revenue": float(service.total_revenue or 0)
+            }
+            for service in services
+        ]
+    except Exception as e:
+        print(f"Error in get_popular_services: {e}")
+        return []
 
 @router.get("/masters/performance")
 async def get_masters_performance(
@@ -206,88 +210,45 @@ async def get_masters_performance(
         return []
     
     # Получаем статистику мастеров
-    result = await db.execute(
-        select(
-            Master.id,
-            Master.display_name,
-            Master.rating,
-            func.count(Booking.id).label('total_bookings'),
-            func.sum(Booking.price).label('total_revenue'),
-            func.count(
-                func.distinct(Booking.client_id)
-            ).label('unique_clients')
-        )
-        .join(Booking, Master.id == Booking.master_id)
-        .where(
-            and_(
-                Master.tenant_id == tenant_id,
-                Master.is_active == True,
-                Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.COMPLETED])
-            )
-        )
-        .group_by(Master.id, Master.display_name, Master.rating)
-        .order_by(func.sum(Booking.price).desc())
-        .limit(limit)
-    )
-    
-    masters = result.all()
-    
-    return [
-        {
-            "id": str(master.id),
-            "display_name": master.display_name,
-            "rating": float(master.rating),
-            "total_bookings": int(master.total_bookings),
-            "total_revenue": float(master.total_revenue or 0),
-            "unique_clients": int(master.unique_clients)
-        }
-        for master in masters
-    ]
-
-
-@router.get("/services/popularity")
-async def get_services_popularity(
-    limit: int = Query(10, ge=1, le=50),
-    current_user = Depends(require_role([UserRole.OWNER, UserRole.MASTER])),
-    db: AsyncSession = Depends(get_db)
-):
-    """Get most popular services"""
-    tenant_id = current_user.tenant_id
-    
-    if not tenant_id:
-        return []
-    
-    # Простая реализация для начала
     try:
         result = await db.execute(
             select(
-                Service.id,
-                Service.name,
-                Service.price,
-                func.count(Booking.id).label('bookings_count'),
-                func.sum(Booking.price).label('revenue')
+                Master.id,
+                Master.display_name,
+                Master.rating,
+                func.count(Booking.id).label('total_bookings'),
+                func.sum(Booking.price).label('total_revenue'),
+                func.count(
+                    func.distinct(Booking.client_id)
+                ).label('unique_clients')
             )
-            .join(Booking, Service.id == Booking.service_id, isouter=True)
-            .where(Service.tenant_id == tenant_id)
-            .group_by(Service.id, Service.name, Service.price)
-            .order_by(func.count(Booking.id).desc())
+            .join(Booking, Master.id == Booking.master_id, isouter=True)
+            .where(
+                and_(
+                    Master.tenant_id == tenant_id,
+                    Master.is_active == True
+                )
+            )
+            .group_by(Master.id, Master.display_name, Master.rating)
+            .order_by(func.sum(Booking.price).desc().nullslast())
             .limit(limit)
         )
         
-        rows = result.all()
+        masters = result.all()
         
         return [
             {
-                "service_id": str(row.id),
-                "name": row.name,
-                "price": float(row.price),
-                "bookings_count": row.bookings_count or 0,
-                "revenue": float(row.revenue) if row.revenue else 0
+                "id": str(master.id),
+                "display_name": master.display_name,
+                "rating": float(master.rating or 0),
+                "total_bookings": int(master.total_bookings or 0),
+                "total_revenue": float(master.total_revenue or 0),
+                "unique_clients": int(master.unique_clients or 0)
             }
-            for row in rows
+            for master in masters
         ]
     except Exception as e:
-        print(f"Error in get_services_popularity: {e}")
+        print(f"Error in get_masters_performance: {e}")
         return []
 
 @router.get("/clients/top")
