@@ -1,4 +1,5 @@
 import axios from 'axios'
+import Cookies from 'js-cookie'
 
 // Определяем базовый URL API
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.jazyl.tech'
@@ -21,7 +22,10 @@ const getTenantInfo = () => {
   if (hostname.includes('.jazyl.tech')) {
     const parts = hostname.split('.jazyl.tech')[0]
     const isAdmin = parts.startsWith('admin.')
-    const subdomain = isAdmin ? parts.substring(6) : parts // убираем 'admin.' если есть
+    let subdomain = isAdmin ? parts.substring(6) : parts // убираем 'admin.' если есть
+    
+    // Убираем www если есть
+    if (subdomain === 'www') subdomain = ''
     
     return { subdomain, isAdmin }
   }
@@ -29,7 +33,61 @@ const getTenantInfo = () => {
   return { subdomain: null, isAdmin: false }
 }
 
-// Auth API
+// ИСПРАВЛЕННЫЙ interceptor для requests - объединяем ваш подход с cookie и мой с admin detection
+api.interceptors.request.use((config) => {
+  if (typeof window !== 'undefined') {
+    const { subdomain, isAdmin } = getTenantInfo()
+    
+    // Добавляем subdomain если он есть и не системный
+    if (subdomain && subdomain !== 'jazyl') {
+      config.headers['X-Tenant-Subdomain'] = subdomain
+    }
+    
+    // Добавляем токен из cookie (ваш хороший подход!)
+    const token = Cookies.get('access-token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    
+    // Также проверяем localStorage как fallback
+    const authData = localStorage.getItem('auth-storage')
+    if (authData && !token) {
+      try {
+        const { state } = JSON.parse(authData)
+        if (state.accessToken) {
+          config.headers.Authorization = `Bearer ${state.accessToken}`
+        }
+      } catch (e) {
+        // Ignore JSON parse errors
+      }
+    }
+  }
+  
+  return config
+})
+
+// ИСПРАВЛЕННЫЙ interceptor для responses - объединяем оба подхода
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (error.response?.status === 401 && typeof window !== 'undefined') {
+      const currentPath = window.location.pathname
+      
+      // Не перенаправляем если уже на странице логина
+      if (currentPath !== '/login') {
+        // Очищаем все данные аутентификации (ваш подход лучше!)
+        Cookies.remove('access-token')
+        Cookies.remove('auth-user')
+        localStorage.removeItem('auth-storage')
+        
+        window.location.href = '/login'
+      }
+    }
+    return Promise.reject(error)
+  }
+)
+
+// ====================== AUTH API ======================
 export const login = async (email: string, password: string) => {
   // OAuth2PasswordRequestForm требует именно такой формат
   const params = new URLSearchParams()
@@ -63,7 +121,7 @@ export const logout = async () => {
   return response.data
 }
 
-// Tenants API
+// ====================== TENANTS API ======================
 export const getTenantBySubdomain = async (subdomain: string) => {
   const response = await api.get(`/api/tenants/subdomain/${subdomain}`)
   return response.data
@@ -79,19 +137,15 @@ export const updateTenant = async (tenantId: string, tenantData: any) => {
   return response.data
 }
 
-// Masters API
+// ====================== MASTERS API ======================
 export const getMasters = async (tenantId?: string) => {
   const config: any = {}
   
-  // Если tenantId не передан, пытаемся получить из URL
-  if (!tenantId) {
-    const { subdomain } = getTenantInfo()
-    if (subdomain) {
-      config.headers = { 'X-Tenant-Subdomain': subdomain }
-    }
-  } else {
+  // Если tenantId передан явно, используем его
+  if (tenantId) {
     config.headers = { 'X-Tenant-ID': tenantId }
   }
+  // Иначе interceptor автоматически добавит X-Tenant-Subdomain
   
   const response = await api.get('/api/masters', config)
   return response.data
@@ -100,12 +154,7 @@ export const getMasters = async (tenantId?: string) => {
 export const getMaster = async (masterId: string, tenantId?: string) => {
   const config: any = {}
   
-  if (!tenantId) {
-    const { subdomain } = getTenantInfo()
-    if (subdomain) {
-      config.headers = { 'X-Tenant-Subdomain': subdomain }
-    }
-  } else {
+  if (tenantId) {
     config.headers = { 'X-Tenant-ID': tenantId }
   }
   
@@ -113,6 +162,28 @@ export const getMaster = async (masterId: string, tenantId?: string) => {
   return response.data
 }
 
+export const createMaster = async (masterData: any, tenantId?: string) => {
+  const config: any = {}
+  
+  if (tenantId) {
+    config.headers = { 'X-Tenant-ID': tenantId }
+  }
+  
+  const response = await api.post('/api/masters', masterData, config)
+  return response.data
+}
+
+export const updateMaster = async (masterId: string, masterData: any) => {
+  const response = await api.put(`/api/masters/${masterId}`, masterData)
+  return response.data
+}
+
+export const deleteMaster = async (masterId: string) => {
+  const response = await api.delete(`/api/masters/${masterId}`)
+  return response.data
+}
+
+// ====================== MASTER PROFILE API (для мастеров) ======================
 export const getMyProfile = async () => {
   const response = await api.get('/api/masters/my-profile')
   return response.data
@@ -145,16 +216,16 @@ export const requestPermission = async (permissionData: any) => {
   return response.data
 }
 
-// Services API
+export const getMyPermissionRequests = async () => {
+  const response = await api.get('/api/masters/my-permission-requests')
+  return response.data
+}
+
+// ====================== SERVICES API ======================
 export const getServices = async (tenantId?: string) => {
   const config: any = {}
   
-  if (!tenantId) {
-    const { subdomain } = getTenantInfo()
-    if (subdomain) {
-      config.headers = { 'X-Tenant-Subdomain': subdomain }
-    }
-  } else {
+  if (tenantId) {
     config.headers = { 'X-Tenant-ID': tenantId }
   }
   
@@ -162,8 +233,14 @@ export const getServices = async (tenantId?: string) => {
   return response.data
 }
 
-export const createService = async (serviceData: any) => {
-  const response = await api.post('/api/services', serviceData)
+export const createService = async (serviceData: any, tenantId?: string) => {
+  const config: any = {}
+  
+  if (tenantId) {
+    config.headers = { 'X-Tenant-ID': tenantId }
+  }
+  
+  const response = await api.post('/api/services', serviceData, config)
   return response.data
 }
 
@@ -177,18 +254,13 @@ export const deleteService = async (serviceId: string) => {
   return response.data
 }
 
-// Clients API
+// ====================== CLIENTS API ======================
 export const getClients = async (search?: string, tenantId?: string) => {
   const config: any = {
     params: { search },
   }
   
-  if (!tenantId) {
-    const { subdomain } = getTenantInfo()
-    if (subdomain) {
-      config.headers = { 'X-Tenant-Subdomain': subdomain }
-    }
-  } else {
+  if (tenantId) {
     config.headers = { 'X-Tenant-ID': tenantId }
   }
   
@@ -201,29 +273,49 @@ export const getClient = async (clientId: string) => {
   return response.data
 }
 
-export const updateClient = async (clientId: string, clientData: any) => {
-  const response = await api.put(`/api/clients/${clientId}`, clientData)
-  return response.data
-}
-
-export const createClient = async (clientData: any) => {
-  const { subdomain } = getTenantInfo()
-  const config = subdomain ? { headers: { 'X-Tenant-Subdomain': subdomain } } : {}
+export const createClient = async (clientData: any, tenantId?: string) => {
+  const config: any = {}
+  
+  if (tenantId) {
+    config.headers = { 'X-Tenant-ID': tenantId }
+  }
   
   const response = await api.post('/api/clients', clientData, config)
   return response.data
 }
 
-// Bookings API
+export const updateClient = async (clientId: string, clientData: any) => {
+  const response = await api.put(`/api/clients/${clientId}`, clientData)
+  return response.data
+}
+
+// ====================== BOOKINGS API ======================
+export const getAvailableSlots = async (
+  masterId: string,
+  date: Date,
+  serviceId: string,
+  tenantId?: string
+) => {
+  const config: any = {
+    params: {
+      master_id: masterId,
+      date: date.toISOString().split('T')[0],
+      service_id: serviceId,
+    }
+  }
+  
+  if (tenantId) {
+    config.headers = { 'X-Tenant-ID': tenantId }
+  }
+  
+  const response = await api.get('/api/bookings/availability/slots', config)
+  return response.data
+}
+
 export const createBooking = async (bookingData: any, tenantId?: string) => {
   const config: any = {}
   
-  if (!tenantId) {
-    const { subdomain } = getTenantInfo()
-    if (subdomain) {
-      config.headers = { 'X-Tenant-Subdomain': subdomain }
-    }
-  } else {
+  if (tenantId) {
     config.headers = { 'X-Tenant-ID': tenantId }
   }
   
@@ -250,50 +342,42 @@ export const cancelBooking = async (bookingId: string, token: string) => {
   return response.data
 }
 
-// Dashboard API
-export const getDashboardStats = async () => {
-  const response = await api.get('/api/dashboard/stats')
+// ====================== DASHBOARD API ======================
+export const getDashboardStats = async (dateFrom?: string, dateTo?: string, tenantId?: string) => {
+  const config: any = {
+    params: { date_from: dateFrom, date_to: dateTo }
+  }
+  
+  if (tenantId) {
+    config.headers = { 'X-Tenant-ID': tenantId }
+  }
+  
+  const response = await api.get('/api/dashboard/stats', config)
   return response.data
 }
 
-export const getTodayOverview = async () => {
-  const response = await api.get('/api/dashboard/today')
+export const getTodayOverview = async (tenantId?: string) => {
+  const config: any = {}
+  
+  if (tenantId) {
+    config.headers = { 'X-Tenant-ID': tenantId }
+  }
+  
+  const response = await api.get('/api/dashboard/today', config)
   return response.data
 }
 
-// Add auth interceptor for protected routes
-api.interceptors.request.use((config) => {
-  if (typeof window !== 'undefined') {
-    const authData = localStorage.getItem('auth-storage')
-    if (authData) {
-      const { state } = JSON.parse(authData)
-      if (state.accessToken) {
-        config.headers.Authorization = `Bearer ${state.accessToken}`
-      }
-    }
-    
-    // Добавляем tenant info если не установлен
-    const { subdomain } = getTenantInfo()
-    if (subdomain && !config.headers['X-Tenant-ID'] && !config.headers['X-Tenant-Subdomain']) {
-      config.headers['X-Tenant-Subdomain'] = subdomain
-    }
+export const getRevenueReport = async (period: string, tenantId?: string) => {
+  const config: any = {
+    params: { period }
   }
-  return config
-})
-
-// Handle token expiration
-api.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    if (error.response?.status === 401) {
-      // Clear auth and redirect to login
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('auth-storage')
-        window.location.href = '/login'
-      }
-    }
-    return Promise.reject(error)
+  
+  if (tenantId) {
+    config.headers = { 'X-Tenant-ID': tenantId }
   }
-)
+  
+  const response = await api.get('/api/dashboard/revenue', config)
+  return response.data
+}
 
 export default api
