@@ -77,8 +77,8 @@ class MasterResponse(BaseModel):
     can_view_analytics: bool = True
     can_upload_photos: bool = True
     
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
