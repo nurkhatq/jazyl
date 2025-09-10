@@ -40,14 +40,34 @@ class Master(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # Связи - используйте строковые ссылки!
-    permission_requests = relationship("PermissionRequest", back_populates="master", lazy="selectin")
-    block_times = relationship("BlockTime", back_populates="master", cascade="all, delete-orphan")
+    # Связи - используйте строковые ссылки и lazy loading!
+    permission_requests = relationship(
+        "PermissionRequest", 
+        back_populates="master", 
+        lazy="select",  # Изменено с selectin на select
+        cascade="all, delete-orphan"
+    )
+    block_times = relationship(
+        "BlockTime", 
+        back_populates="master", 
+        lazy="select",
+        cascade="all, delete-orphan"
+    )
     tenant = relationship("Tenant", back_populates="masters")
     user = relationship("User", back_populates="master_profile")
-    schedules = relationship("MasterSchedule", back_populates="master", cascade="all, delete-orphan")
-    services = relationship("MasterService", back_populates="master", cascade="all, delete-orphan")
-    bookings = relationship("Booking", back_populates="master")
+    schedules = relationship(
+        "MasterSchedule", 
+        back_populates="master", 
+        lazy="select",
+        cascade="all, delete-orphan"
+    )
+    services = relationship(
+        "MasterService", 
+        back_populates="master", 
+        lazy="select",
+        cascade="all, delete-orphan"
+    )
+    bookings = relationship("Booking", back_populates="master", lazy="select")
 
 class MasterSchedule(Base):
     __tablename__ = "master_schedules"

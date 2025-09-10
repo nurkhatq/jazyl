@@ -116,16 +116,28 @@ async def get_current_tenant(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ) -> UUID:
-    # Get subdomain from request headers or host
+    """Get current tenant from request"""
+    # Метод 1: Получить tenant_id из заголовка X-Tenant-ID
+    tenant_id_str = request.headers.get("X-Tenant-ID")
+    if tenant_id_str:
+        try:
+            return UUID(tenant_id_str)
+        except ValueError:
+            pass
+    
+    # Метод 2: Получить subdomain из заголовка X-Tenant-Subdomain
     subdomain = request.headers.get("X-Tenant-Subdomain")
     
     if not subdomain:
-        # Try to extract from host
+        # Метод 3: Извлечь из host
         host = request.headers.get("host", "")
         if ".jazyl.tech" in host:
             subdomain = host.split(".jazyl.tech")[0]
+            # Удаляем admin. префикс если есть
+            if subdomain.startswith("admin."):
+                subdomain = subdomain[6:]  # убираем "admin."
     
-    if not subdomain:
+    if not subdomain or subdomain in ["www", "jazyl"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tenant not specified"
@@ -150,12 +162,10 @@ async def get_optional_current_tenant(
 ) -> Optional[UUID]:
     """Get current tenant without requiring it"""
     try:
-        return await get_current_tenant(request, None, db)
+        return await get_current_tenant(request, db)
     except:
         return None
-    
 
-# Добавьте эту функцию если её ещё нет
 async def get_current_user_optional(
     request: Request,
     db: AsyncSession = Depends(get_db)

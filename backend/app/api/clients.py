@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from uuid import UUID
@@ -14,10 +14,12 @@ router = APIRouter()
 @router.post("/", response_model=ClientResponse)
 async def create_client(
     client_data: ClientCreate,
-    tenant_id: UUID = Depends(get_current_tenant),
+    request: Request,
+    current_user = Depends(require_role([UserRole.OWNER, UserRole.MASTER])),
     db: AsyncSession = Depends(get_db)
 ):
     """Create new client"""
+    tenant_id = await get_current_tenant(request, db)
     service = ClientService(db)
     
     client = await service.create_client(tenant_id, client_data)
@@ -26,13 +28,14 @@ async def create_client(
 
 @router.get("/", response_model=List[ClientResponse])
 async def get_clients(
+    request: Request,
     search: Optional[str] = Query(None),
     is_vip: Optional[bool] = Query(None),
-    tenant_id: UUID = Depends(get_current_tenant),
     current_user = Depends(require_role([UserRole.OWNER, UserRole.MASTER])),
     db: AsyncSession = Depends(get_db)
 ):
     """Get all clients for tenant"""
+    tenant_id = await get_current_tenant(request, db)
     service = ClientService(db)
     
     clients = await service.get_clients(

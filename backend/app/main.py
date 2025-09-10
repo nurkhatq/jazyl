@@ -1,5 +1,4 @@
 from fastapi import FastAPI, Request, status
-# from fastapi.middleware.cors import CORSMiddleware  # REMOVED - nginx handles CORS
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -14,9 +13,10 @@ from app.config import settings
 from app.database import engine, Base
 from app.api import auth, tenants, bookings, masters, services, clients, dashboard
 from app.utils.logger import setup_logging
-from app.utils.middleware import TenantMiddleware, LoggingMiddleware
+from app.utils.middleware import TenantMiddleware, LoggingMiddleware, URLFixMiddleware
 from app.utils.exceptions import CustomException
 import os
+
 # Setup logging
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -50,21 +50,19 @@ app = FastAPI(
     redoc_url="/redoc" if settings.DEBUG else None,
 )
 
-# Add middleware (CORS REMOVED - nginx handles it)
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=settings.ALLOWED_ORIGINS,
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
-
+# Add middleware in correct order (ВАЖНО: порядок имеет значение!)
 app.add_middleware(
     TrustedHostMiddleware,
     allowed_hosts=settings.ALLOWED_HOSTS,
 )
 
+# Сначала URL fixing
+app.add_middleware(URLFixMiddleware)
+
+# Потом logging
 app.add_middleware(LoggingMiddleware)
+
+# Потом tenant detection
 app.add_middleware(TenantMiddleware)
 
 # Add rate limiter
@@ -101,14 +99,15 @@ app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"]
 metrics_app = make_asgi_app()
 app.mount("/metrics", metrics_app)
 
-
+# Create uploads directory if not exists
 uploads_dir = "uploads"
 if not os.path.exists(uploads_dir):
     os.makedirs(uploads_dir)
     os.makedirs(os.path.join(uploads_dir, "masters"))
 
-
+# Mount static files
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 @app.get("/")
 async def root():
     return {
