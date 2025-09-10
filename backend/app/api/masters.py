@@ -13,6 +13,8 @@ import string
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.models.master import Master, MasterSchedule
+from app.models.tenant import Tenant
+from app.utils.email import EmailService
 from app.schemas.master import MasterUpdate, MasterResponse, MasterPermissionsUpdate, MasterCreate
 from app.models.permission_request import PermissionRequestType
 from app.services.master import MasterService
@@ -111,10 +113,42 @@ async def create_master(
             role=UserRole.MASTER
         )
         
-        new_user = await auth_service.create_user(user_data)
+        new_user = await auth_service.register_user(user_data)
+        if not new_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to create user - email might already exist"
+            )
+        
         user_id = new_user.id
         
-        # TODO: Отправить email с паролем и инструкциями по входу
+        # Получаем информацию о тенанте для email
+        tenant_result = await db.execute(
+            select(Tenant).where(Tenant.id == tenant_id)
+        )
+        tenant = tenant_result.scalar_one_or_none()
+        barbershop_name = tenant.name if tenant else "Barbershop"
+        
+        # Отправляем приветственный email с учетными данными
+        try:
+            email_service = EmailService()
+            email_sent = await email_service.send_master_welcome_email(
+                to_email=master_data.user_email,
+                master_name=master_data.user_first_name or "Master",
+                barbershop_name=barbershop_name,
+                temp_password=temp_password  # Передаем временный пароль
+            )
+            
+            if email_sent:
+                print(f"✅ Welcome email sent successfully to {master_data.user_email}")
+                print(f"📧 Temporary password: {temp_password}")
+            else:
+                print(f"❌ Failed to send welcome email to {master_data.user_email}")
+                print(f"⚠️ Manual setup required - temp password: {temp_password}")
+                
+        except Exception as e:
+            print(f"❌ Exception sending welcome email: {e}")
+            print(f"⚠️ Manual setup required - temp password: {temp_password}")
         
     elif user_id:
         # Проверяем что пользователь существует и является мастером

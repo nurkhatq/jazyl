@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Welcome to {{ barbershop_name }}{% endblock %}
+
+{% block content %}
+<h2>Welcome to {{ barbershop_name }}!</h2>
+
+<p>Hello {{ master_name }},</p>
+
+<p>You have been added as a master at <strong>{{ barbershop_name }}</strong>! Your account has been created and you can now access the master dashboard.</p>
+
+<div class="info-box">
+    <h3>🔑 Your Login Credentials:</h3>
+    <div class="info-row">
+        <span class="info-label">Email:</span>
+        <span style="font-family: monospace; background: #f0f0f0; padding: 4px 8px; border-radius: 3px;">{{ to_email }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Temporary Password:</span>
+        <span style="font-family: monospace; background: #f0f0f0; padding: 4px 8px; border-radius: 3px;">{{ temp_password }}</span>
+    </div>
+</div>
+
+<div style="text-align: center;">
+    <a href="{{ login_link }}" class="button">🚀 Login to Dashboard</a>
+</div>
+
+<div style="background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; padding: 15px; margin: 20px 0; color: #856404;">
+    <strong>⚠️ Important Security Notice:</strong>
+    <ul style="margin: 10px 0;">
+        <li>This is a <strong>temporary password</strong> for your first login</li>
+        <li>Please <strong>change it immediately</strong> after logging in</li>
+        <li>Keep your credentials secure and don't share them</li>
+    </ul>
+</div>
+
+<h3>🎯 What you can do as a master:</h3>
+<ul>
+    <li>📅 View and manage your bookings</li>
+    <li>👤 Update your profile and photo</li>
+    <li>🕐 Set your working schedule</li>
+    <li>📊 View your performance analytics</li>
+    <li>💼 Manage your services and pricing</li>
+</ul>
+
+<p>If you have any questions or need help getting started, don't hesitate to reach out to the {{ barbershop_name }} team.</p>
+
+<p>Best regards,<br>The Jazyl Team</p>
+{% endblock %}

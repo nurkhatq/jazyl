@@ -100,13 +100,15 @@ class EmailService:
         self,
         to_email: str,
         master_name: str,
-        barbershop_name: str
+        barbershop_name: str,
+        temp_password: str  # ДОБАВЛЯЕМ ПАРАМЕТР
     ) -> bool:
-        """Send welcome email to new master with login instructions"""
+        """Send welcome email to new master with login credentials"""
         
-        # Создаем ссылку без токена, только с email
+        # Создаем ссылку для установки пароля
         set_password_link = f"https://jazyl.tech/set-password?email={to_email}"
         
+        # Обновляем HTML контент, добавив временный пароль
         html_content = f"""
         <!DOCTYPE html>
         <html>
@@ -156,6 +158,23 @@ class EmailService:
                     padding: 15px;
                     margin: 20px 0;
                 }}
+                .credentials-box {{
+                    background-color: #fff3cd;
+                    border: 1px solid #ffeaa7;
+                    border-radius: 6px;
+                    padding: 15px;
+                    margin: 20px 0;
+                    color: #856404;
+                }}
+                .credential-value {{
+                    font-family: monospace;
+                    background-color: #ffffff;
+                    padding: 4px 8px;
+                    border-radius: 3px;
+                    border: 1px solid #ced4da;
+                    display: inline-block;
+                    margin-left: 10px;
+                }}
                 .footer {{
                     margin-top: 30px;
                     padding-top: 20px;
@@ -176,29 +195,38 @@ class EmailService:
                 
                 <p>Hello {master_name},</p>
                 
-                <p>You have been added as a master at <strong>{barbershop_name}</strong>. To complete your registration and access your dashboard, please set your password.</p>
+                <p>You have been added as a master at <strong>{barbershop_name}</strong>! Your account has been created with temporary credentials.</p>
                 
                 <div class="info-box">
                     <p><strong>Your login email:</strong> {to_email}</p>
                     <p><strong>Role:</strong> Master</p>
                     <p><strong>Barbershop:</strong> {barbershop_name}</p>
                 </div>
-                
-                <p>Click the button below to set your password:</p>
-                
-                <div style="text-align: center;">
-                    <a href="{set_password_link}" class="button">Set Your Password</a>
+
+                <div class="credentials-box">
+                    <h3>🔑 Temporary Login Credentials:</h3>
+                    <p><strong>Email:</strong> <span class="credential-value">{to_email}</span></p>
+                    <p><strong>Temporary Password:</strong> <span class="credential-value">{temp_password}</span></p>
+                    <p><strong>⚠️ Important:</strong> This password is temporary. Please change it after your first login!</p>
                 </div>
                 
-                <p>After setting your password, you can log in at:</p>
-                <p><a href="https://jazyl.tech/login">https://jazyl.tech/login</a></p>
+                <p>You can log in using your temporary password, or set a new password directly:</p>
                 
-                <h3>What you can do as a Master:</h3>
+                <div style="text-align: center;">
+                    <a href="{set_password_link}" class="button">Set New Password</a>
+                    <br>
+                    <span style="margin: 0 10px;">OR</span>
+                    <br>
+                    <a href="https://jazyl.tech/login" class="button" style="background-color: #666;">Login with Temporary Password</a>
+                </div>
+                
+                <h3>🎯 What you can do as a Master:</h3>
                 <ul>
-                    <li>View and manage your schedule</li>
-                    <li>See your upcoming appointments</li>
-                    <li>Manage your client notes</li>
-                    <li>Track your performance</li>
+                    <li>📅 View and manage your schedule</li>
+                    <li>📝 See your upcoming appointments</li>
+                    <li>👤 Manage your client notes</li>
+                    <li>📊 Track your performance</li>
+                    <li>🔧 Update your profile</li>
                 </ul>
                 
                 <p>If you have any questions, please contact your barbershop administrator.</p>
@@ -217,7 +245,7 @@ class EmailService:
         
         return await self.send_email(
             to_email=to_email,
-            subject=f"Welcome to {barbershop_name} - Set Your Password",
+            subject=f"Welcome to {barbershop_name} - Your Master Account Ready! 🎉",
             html_content=html_content
         )
 

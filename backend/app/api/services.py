@@ -47,7 +47,7 @@ async def get_current_user_optional(
 @router.post("/", response_model=ServiceResponse)
 async def create_service(
     service_data: ServiceCreate,
-    current_user: User = Depends(require_role(UserRole.OWNER)),
+    current_user: User = Depends(require_role([UserRole.OWNER])),
     db: AsyncSession = Depends(get_db)
 ):
     service = ServiceService(db)
@@ -140,9 +140,21 @@ async def create_category(
 
 @router.get("/categories")
 async def get_categories(
-    tenant_id: Optional[UUID] = Depends(require_role(UserRole.OWNER)),  # Можно заменить на get_current_tenant при необходимости
+    request: Request,
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
+    """Get categories - поддерживает публичный доступ"""
     service = ServiceService(db)
+    
+    # Определяем tenant_id правильно
+    if current_user:
+        tenant_id = current_user.tenant_id
+    else:
+        tenant_id = await get_tenant_id_from_header(request)
+    
+    if not tenant_id:
+        return []
+    
     categories = await service.get_categories(tenant_id)
     return categories
