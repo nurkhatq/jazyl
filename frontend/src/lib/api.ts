@@ -16,6 +16,24 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`
     }
     
+    // ✅ ИСПРАВЛЕНО: Добавляем X-Tenant-ID из user данных
+    const authUser = Cookies.get('auth-user')
+    if (authUser) {
+      try {
+        const userData = JSON.parse(authUser)
+        if (userData.tenant_id) {
+          // ⭐ ВАЖНО: Убеждаемся что отправляем строку, а не объект!
+          const tenantId = typeof userData.tenant_id === 'string' 
+            ? userData.tenant_id 
+            : String(userData.tenant_id)
+          config.headers['X-Tenant-ID'] = tenantId
+          console.log('🔧 [API] Setting X-Tenant-ID from auth-user:', tenantId)
+        }
+      } catch (error) {
+        console.error('❌ [API] Error parsing auth-user data:', error)
+      }
+    }
+    
     // Автоматически добавляем X-Tenant-Subdomain если мы на поддомене
     if (typeof window !== 'undefined') {
       const hostname = window.location.hostname
@@ -30,6 +48,7 @@ api.interceptors.request.use(
         
         if (subdomain && subdomain !== 'jazyl') {
           config.headers['X-Tenant-Subdomain'] = subdomain
+          console.log('🔧 [API] Setting X-Tenant-Subdomain:', subdomain)
         }
       }
     }
@@ -114,8 +133,11 @@ export const getMasters = async (tenantId?: string) => {
   try {
     const config: any = {}
     
+    // ✅ ИСПРАВЛЕНО: Правильная отправка X-Tenant-ID как строки
     if (tenantId) {
-      config.headers = { 'X-Tenant-ID': tenantId }
+      const tenantIdString = typeof tenantId === 'string' ? tenantId : String(tenantId)
+      config.headers = { 'X-Tenant-ID': tenantIdString }
+      console.log('🔧 [getMasters] Setting X-Tenant-ID:', tenantIdString)
     }
     
     const response = await api.get('/api/masters', config)
@@ -131,7 +153,8 @@ export const getMaster = async (masterId: string, tenantId?: string) => {
     const config: any = {}
     
     if (tenantId) {
-      config.headers = { 'X-Tenant-ID': tenantId }
+      const tenantIdString = typeof tenantId === 'string' ? tenantId : String(tenantId)
+      config.headers = { 'X-Tenant-ID': tenantIdString }
     }
     
     const response = await api.get(`/api/masters/${masterId}`, config)
@@ -147,7 +170,8 @@ export const createMaster = async (masterData: any, tenantId?: string) => {
     const config: any = {}
     
     if (tenantId) {
-      config.headers = { 'X-Tenant-ID': tenantId }
+      const tenantIdString = typeof tenantId === 'string' ? tenantId : String(tenantId)
+      config.headers = { 'X-Tenant-ID': tenantIdString }
     }
     
     const response = await api.post('/api/masters', masterData, config)
@@ -434,25 +458,44 @@ export const rejectPermissionRequest = async (requestId: string, reviewNote?: st
 
 // ====================== SERVICES API ======================
 export const getServices = async (tenantId?: string) => {
-  const config: any = {}
-  
-  if (tenantId) {
-    config.headers = { 'X-Tenant-ID': tenantId }
+  try {
+    const config: any = {}
+    
+    // ✅ ИСПРАВЛЕНО: Правильная отправка X-Tenant-ID как строки
+    if (tenantId) {
+      const tenantIdString = typeof tenantId === 'string' ? tenantId : String(tenantId)
+      config.headers = { 'X-Tenant-ID': tenantIdString }
+      console.log('🔧 [getServices] Setting X-Tenant-ID:', tenantIdString)
+    }
+    
+    const response = await api.get('/api/services', config)
+    return response.data
+  } catch (error) {
+    console.error('Error getting services:', error)
+    throw error
   }
-  
-  const response = await api.get('/api/services', config)
-  return response.data
 }
 
 export const createService = async (serviceData: any, tenantId?: string) => {
-  const config: any = {}
-  
-  if (tenantId) {
-    config.headers = { 'X-Tenant-ID': tenantId }
+  try {
+    const config: any = {}
+    
+    // ✅ ИСПРАВЛЕНО: Правильная отправка X-Tenant-ID как строки
+    if (tenantId) {
+      const tenantIdString = typeof tenantId === 'string' ? tenantId : String(tenantId)
+      config.headers = { 'X-Tenant-ID': tenantIdString }
+      console.log('🔧 [createService] Setting X-Tenant-ID:', tenantIdString)
+    }
+    
+    console.log('🔧 [createService] Request data:', serviceData)
+    console.log('🔧 [createService] Config:', config)
+    
+    const response = await api.post('/api/services', serviceData, config)
+    return response.data
+  } catch (error) {
+    console.error('❌ [createService] Error:', error)
+    throw error
   }
-  
-  const response = await api.post('/api/services', serviceData, config)
-  return response.data
 }
 
 export const updateService = async (serviceId: string, serviceData: any) => {
@@ -472,7 +515,8 @@ export const getClients = async (search?: string, tenantId?: string) => {
   }
   
   if (tenantId) {
-    config.headers = { 'X-Tenant-ID': tenantId }
+    const tenantIdString = typeof tenantId === 'string' ? tenantId : String(tenantId)
+    config.headers = { 'X-Tenant-ID': tenantIdString }
   }
   
   const response = await api.get('/api/clients', config)
@@ -488,7 +532,8 @@ export const createClient = async (clientData: any, tenantId?: string) => {
   const config: any = {}
   
   if (tenantId) {
-    config.headers = { 'X-Tenant-ID': tenantId }
+    const tenantIdString = typeof tenantId === 'string' ? tenantId : String(tenantId)
+    config.headers = { 'X-Tenant-ID': tenantIdString }
   }
   
   const response = await api.post('/api/clients', clientData, config)
@@ -516,7 +561,8 @@ export const getAvailableSlots = async (
   }
   
   if (tenantId) {
-    config.headers = { 'X-Tenant-ID': tenantId }
+    const tenantIdString = typeof tenantId === 'string' ? tenantId : String(tenantId)
+    config.headers = { 'X-Tenant-ID': tenantIdString }
   }
   
   const response = await api.get('/api/bookings/availability/slots', config)
@@ -527,7 +573,8 @@ export const createBooking = async (bookingData: any, tenantId?: string) => {
   const config: any = {}
   
   if (tenantId) {
-    config.headers = { 'X-Tenant-ID': tenantId }
+    const tenantIdString = typeof tenantId === 'string' ? tenantId : String(tenantId)
+    config.headers = { 'X-Tenant-ID': tenantIdString }
   }
   
   const response = await api.post('/api/bookings', bookingData, config)
@@ -560,7 +607,8 @@ export const getDashboardStats = async (dateFrom?: string, dateTo?: string, tena
   }
   
   if (tenantId) {
-    config.headers = { 'X-Tenant-ID': tenantId }
+    const tenantIdString = typeof tenantId === 'string' ? tenantId : String(tenantId)
+    config.headers = { 'X-Tenant-ID': tenantIdString }
   }
   
   const response = await api.get('/api/dashboard/stats', config)
@@ -571,7 +619,8 @@ export const getTodayOverview = async (tenantId?: string) => {
   const config: any = {}
   
   if (tenantId) {
-    config.headers = { 'X-Tenant-ID': tenantId }
+    const tenantIdString = typeof tenantId === 'string' ? tenantId : String(tenantId)
+    config.headers = { 'X-Tenant-ID': tenantIdString }
   }
   
   const response = await api.get('/api/dashboard/today', config)
@@ -584,7 +633,8 @@ export const getRevenueReport = async (period: string, tenantId?: string) => {
   }
   
   if (tenantId) {
-    config.headers = { 'X-Tenant-ID': tenantId }
+    const tenantIdString = typeof tenantId === 'string' ? tenantId : String(tenantId)
+    config.headers = { 'X-Tenant-ID': tenantIdString }
   }
   
   const response = await api.get('/api/dashboard/revenue', config)

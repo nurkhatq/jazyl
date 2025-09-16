@@ -18,7 +18,7 @@ from app.models.tenant import Tenant
 from app.utils.email import EmailService
 from app.schemas.master import (
     MasterUpdate, MasterResponse, MasterPermissionsUpdate, MasterCreate,
-    MasterStatsResponse, TodayBookingsResponse  # ✅ ДОБАВЛЕНЫ новые схемы
+    MasterStatsResponse, TodayBookingsResponse
 )
 from app.models.permission_request import PermissionRequestType
 from app.services.master import MasterService
@@ -38,81 +38,16 @@ async def get_tenant_id_from_header(request: Request) -> Optional[UUID]:
             return None
     return None
 
-# ---------------------- PUBLIC ENDPOINTS для клиентов ----------------------
-@router.get("", response_model=List[MasterResponse])
-@router.get("/", response_model=List[MasterResponse], include_in_schema=False)
-async def get_masters(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional)
-):
-    """Получить список мастеров (публичный доступ для клиентов)"""
-    try:
-        tenant_id = await get_current_tenant(request, db)
-    except HTTPException:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tenant not specified"
-        )
-    
-    # Для публичного доступа показываем только активных и видимых мастеров
-    result = await db.execute(
-        select(Master).where(
-            and_(
-                Master.tenant_id == tenant_id,
-                Master.is_active == True,
-                Master.is_visible == True
-            )
-        )
-    )
-    masters = result.scalars().all()
-    
-    return masters
-
-@router.get("/{master_id}", response_model=MasterResponse)
-async def get_master(
-    master_id: UUID,
-    request: Request,
-    db: AsyncSession = Depends(get_db)
-):
-    """Получить мастера по ID для публичного доступа"""
-    try:
-        tenant_id = await get_current_tenant(request, db)
-    except HTTPException:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tenant not specified"
-        )
-    
-    result = await db.execute(
-        select(Master).where(
-            and_(
-                Master.id == master_id,
-                Master.tenant_id == tenant_id,
-                Master.is_active == True,
-                Master.is_visible == True
-            )
-        )
-    )
-    master = result.scalar_one_or_none()
-    
-    if not master:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Master not found"
-        )
-    
-    return master
+# ====================== ⭐ ВАЖНО: СПЕЦИФИЧНЫЕ РОУТЫ ИДУТ ПЕРВЫМИ! ======================
+# Все роуты с фиксированными путями должны быть ПЕРЕД параметрическими /{master_id}
 
 # ---------------------- Endpoints for current master ----------------------
-
-# ✅ ИСПРАВЛЕННЫЙ ЭНДПОИНТ: my-profile
 @router.get("/my-profile", response_model=MasterResponse)
 async def get_my_profile(
     current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
-    """Получить свой профиль мастера - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
+    """Получить свой профиль мастера"""
     try:
         print(f"🔍 Getting profile for user: {current_user.email} (ID: {current_user.id})")
         
@@ -147,7 +82,6 @@ async def get_my_profile(
                 can_view_analytics=True,
                 can_upload_photos=True,
                 experience_years=0,
-                # ✅ ИСПРАВЛЕНО: Явно устанавливаем временные метки
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow()
             )
@@ -159,7 +93,7 @@ async def get_my_profile(
         else:
             print(f"✅ Found existing master profile: {master.display_name}")
             
-            # ✅ ИСПРАВЛЕНО: Проверяем и исправляем NULL временные метки
+            # Проверяем и исправляем NULL временные метки
             if master.created_at is None:
                 master.created_at = datetime.utcnow()
             if master.updated_at is None:
@@ -210,13 +144,12 @@ async def update_my_profile(
     
     return master
 
-# ✅ ИСПРАВЛЕННЫЙ ЭНДПОИНТ: my-stats
 @router.get("/my-stats", response_model=MasterStatsResponse)
 async def get_my_stats(
     current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
-    """Получить статистику мастера - ИСПРАВЛЕННАЯ ВЕРСИЯ с правильной схемой ответа"""
+    """Получить статистику мастера"""
     try:
         print(f"🔍 Getting stats for user: {current_user.email} (ID: {current_user.id})")
         
@@ -228,7 +161,6 @@ async def get_my_stats(
         
         if not master:
             print(f"⚠️ No master profile found for user {current_user.email}")
-            # Если профиля нет, возвращаем нулевую статистику
             return MasterStatsResponse()
         
         print(f"✅ Found master profile: {master.display_name}")
@@ -236,7 +168,6 @@ async def get_my_stats(
         # Проверяем права доступа (более мягко)
         if not master.can_view_analytics:
             print(f"⚠️ Master {master.display_name} has no analytics permission, returning empty stats")
-            # Вместо ошибки возвращаем пустую статистику
             return MasterStatsResponse()
         
         try:
@@ -313,7 +244,6 @@ async def get_my_stats(
             if total_bookings > 0:
                 cancellation_rate = (cancelled_bookings / total_bookings) * 100
             
-            # ✅ ИСПРАВЛЕНО: Возвращаем объект схемы вместо словаря
             return MasterStatsResponse(
                 weekBookings=week_bookings,
                 totalClients=total_clients,
@@ -326,7 +256,6 @@ async def get_my_stats(
             
         except Exception as stats_error:
             print(f"❌ Error calculating stats: {stats_error}")
-            # В случае ошибки с БД возвращаем нулевую статистику
             return MasterStatsResponse()
         
     except HTTPException:
@@ -335,16 +264,14 @@ async def get_my_stats(
         print(f"❌ Error in get_my_stats: {e}")
         import traceback
         traceback.print_exc()
-        # Вместо 500 ошибки возвращаем пустую статистику
         return MasterStatsResponse()
 
-# ✅ ИСПРАВЛЕННЫЙ ЭНДПОИНТ: my-bookings/today
 @router.get("/my-bookings/today", response_model=TodayBookingsResponse)
 async def get_my_bookings_today(
     current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
-    """Получить записи мастера на сегодня - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
+    """Получить записи мастера на сегодня"""
     try:
         # Находим профиль мастера
         result = await db.execute(
@@ -358,7 +285,6 @@ async def get_my_bookings_today(
         # Проверяем права доступа к записям
         if not master.can_manage_bookings:
             print(f"⚠️ Master {master.display_name} has no booking management permission")
-            # Вместо ошибки возвращаем пустой список
             return TodayBookingsResponse(bookings=[], total_count=0)
         
         # Определяем начало и конец сегодняшнего дня
@@ -403,7 +329,6 @@ async def get_my_bookings_today(
         print(f"❌ Error in get_my_bookings_today: {e}")
         import traceback
         traceback.print_exc()
-        # Возвращаем пустой результат вместо ошибки
         return TodayBookingsResponse(bookings=[], total_count=0)
 
 @router.post("/upload-photo")
@@ -527,6 +452,7 @@ async def get_my_analytics(
             "client_retention": 0,
             "average_rating": 0
         }
+
 @router.post("/request-permission")
 async def request_permission(
     permission_data: dict,
@@ -686,6 +612,75 @@ async def block_my_time(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to block time"
         )
+
+# ---------------------- PUBLIC ENDPOINTS для клиентов ----------------------
+# ⭐ ВАЖНО: Эти роуты идут ПОСЛЕ специфичных роутов для мастеров!
+
+@router.get("", response_model=List[MasterResponse])
+@router.get("/", response_model=List[MasterResponse], include_in_schema=False)
+async def get_masters(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
+    """Получить список мастеров (публичный доступ для клиентов)"""
+    try:
+        tenant_id = await get_current_tenant(request, db)
+    except HTTPException:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant not specified"
+        )
+    
+    # Для публичного доступа показываем только активных и видимых мастеров
+    result = await db.execute(
+        select(Master).where(
+            and_(
+                Master.tenant_id == tenant_id,
+                Master.is_active == True,
+                Master.is_visible == True
+            )
+        )
+    )
+    masters = result.scalars().all()
+    
+    return masters
+
+# ⭐ ВАЖНО: Параметрический роут /{master_id} должен быть В САМОМ КОНЦЕ!
+@router.get("/{master_id}", response_model=MasterResponse)
+async def get_master(
+    master_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Получить мастера по ID для публичного доступа"""
+    try:
+        tenant_id = await get_current_tenant(request, db)
+    except HTTPException:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant not specified"
+        )
+    
+    result = await db.execute(
+        select(Master).where(
+            and_(
+                Master.id == master_id,
+                Master.tenant_id == tenant_id,
+                Master.is_active == True,
+                Master.is_visible == True
+            )
+        )
+    )
+    master = result.scalar_one_or_none()
+    
+    if not master:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Master not found"
+        )
+    
+    return master
 
 # ====================== АДМИНСКИЕ ЭНДПОИНТЫ ======================
 
@@ -886,212 +881,3 @@ async def update_master_permissions(
     await db.refresh(master)
     
     return master
-
-
-# В конец файла backend/app/api/masters.py добавляем дебаг эндпоинты:
-
-# ============================= ДЕБАГ ЭНДПОИНТЫ =============================
-# Временные эндпоинты для диагностики 422 ошибок
-
-from pydantic import ValidationError
-import json
-
-@router.get("/my-profile-debug")
-async def get_my_profile_debug(
-    current_user: User = Depends(get_current_master),
-    db: AsyncSession = Depends(get_db)
-):
-    """ДЕБАГ версия get_my_profile для выявления 422 ошибки"""
-    try:
-        print(f"🔍 [DEBUG] Getting profile for user: {current_user.email}")
-        print(f"🔍 [DEBUG] User ID: {current_user.id}")
-        print(f"🔍 [DEBUG] User tenant_id: {current_user.tenant_id}")
-        
-        # Получаем мастера
-        result = await db.execute(
-            select(Master).where(Master.user_id == current_user.id)
-        )
-        master = result.scalar_one_or_none()
-        
-        if not master:
-            print("❌ [DEBUG] No master profile found")
-            return {"error": "No master profile found", "user_id": str(current_user.id)}
-        
-        print(f"✅ [DEBUG] Found master: {master.id}")
-        
-        # ДЕТАЛЬНЫЙ ДЕБАГ ВСЕХ ПОЛЕЙ
-        master_data = {
-            "id": master.id,
-            "tenant_id": master.tenant_id, 
-            "user_id": master.user_id,
-            "display_name": master.display_name,
-            "description": master.description,
-            "photo_url": master.photo_url,
-            "specialization": master.specialization,
-            "experience_years": master.experience_years,
-            "rating": master.rating,
-            "reviews_count": master.reviews_count,
-            "is_active": master.is_active,
-            "is_visible": master.is_visible,
-            "can_edit_profile": master.can_edit_profile,
-            "can_edit_schedule": master.can_edit_schedule,
-            "can_edit_services": master.can_edit_services,
-            "can_manage_bookings": master.can_manage_bookings,
-            "can_view_analytics": master.can_view_analytics,
-            "can_upload_photos": master.can_upload_photos,
-            "created_at": master.created_at,
-            "updated_at": master.updated_at
-        }
-        
-        print("📋 [DEBUG] Master data:")
-        for key, value in master_data.items():
-            print(f"  {key}: {value} (type: {type(value)})")
-            
-        # Проверяем каждое поле на None
-        print("\n🔍 [DEBUG] Checking for None values:")
-        none_fields = []
-        for key, value in master_data.items():
-            if value is None:
-                none_fields.append(key)
-                print(f"  ⚠️ {key} is None")
-        
-        if none_fields:
-            print(f"❌ [DEBUG] Found None fields: {none_fields}")
-        
-        # Пробуем создать схему ответа вручную
-        print("\n🧪 [DEBUG] Testing MasterResponse validation...")
-        try:
-            response = MasterResponse(**master_data)
-            print("✅ [DEBUG] MasterResponse validation successful!")
-            return response.dict()  # Возвращаем как dict для дебага
-        except ValidationError as ve:
-            print(f"❌ [DEBUG] Pydantic validation error:")
-            print(f"  Error details: {ve.errors()}")
-            print(f"  Error JSON: {ve.json()}")
-            
-            # Возвращаем детальную ошибку
-            return {
-                "validation_error": True,
-                "errors": ve.errors(),
-                "master_data": master_data,
-                "none_fields": none_fields
-            }
-        except Exception as e:
-            print(f"❌ [DEBUG] Unexpected error in validation: {e}")
-            return {
-                "unexpected_error": str(e),
-                "master_data": master_data
-            }
-            
-    except Exception as e:
-        print(f"❌ [DEBUG] Error in get_my_profile_debug: {e}")
-        import traceback
-        traceback.print_exc()
-        return {"error": str(e), "traceback": traceback.format_exc()}
-
-@router.get("/my-stats-debug") 
-async def get_my_stats_debug(
-    current_user: User = Depends(get_current_master),
-    db: AsyncSession = Depends(get_db)
-):
-    """ДЕБАГ версия get_my_stats для выявления 422 ошибки"""
-    try:
-        print(f"🔍 [DEBUG] Getting stats for user: {current_user.email}")
-        
-        # Находим мастера
-        result = await db.execute(
-            select(Master).where(Master.user_id == current_user.id)
-        )
-        master = result.scalar_one_or_none()
-        
-        if not master:
-            print("❌ [DEBUG] No master profile found for stats")
-            return {"error": "No master profile found"}
-        
-        print(f"✅ [DEBUG] Found master for stats: {master.display_name}")
-        
-        # Простая статистика
-        stats_data = {
-            "weekBookings": 0,
-            "totalClients": 0,
-            "monthRevenue": 0.0,
-            "totalBookings": 0,
-            "completedBookings": 0,
-            "cancelledBookings": 0,
-            "cancellationRate": 0.0
-        }
-        
-        print("📋 [DEBUG] Stats data:")
-        for key, value in stats_data.items():
-            print(f"  {key}: {value} (type: {type(value)})")
-        
-        # Пробуем создать схему ответа
-        print("\n🧪 [DEBUG] Testing MasterStatsResponse validation...")
-        try:
-            response = MasterStatsResponse(**stats_data)
-            print("✅ [DEBUG] MasterStatsResponse validation successful!")
-            return response.dict()
-        except ValidationError as ve:
-            print(f"❌ [DEBUG] Stats validation error:")
-            print(f"  Error details: {ve.errors()}")
-            return {
-                "validation_error": True,
-                "errors": ve.errors(),
-                "stats_data": stats_data
-            }
-        except Exception as e:
-            print(f"❌ [DEBUG] Unexpected error in stats validation: {e}")
-            return {
-                "unexpected_error": str(e),
-                "stats_data": stats_data
-            }
-            
-    except Exception as e:
-        print(f"❌ [DEBUG] Error in get_my_stats_debug: {e}")
-        import traceback
-        traceback.print_exc()
-        return {"error": str(e), "traceback": traceback.format_exc()}
-
-@router.get("/debug-db-master")
-async def debug_db_master(
-    current_user: User = Depends(get_current_master),
-    db: AsyncSession = Depends(get_db)
-):
-    """Прямой дебаг базы данных мастера"""
-    try:
-        print(f"🔍 [DEBUG] Direct DB access for user: {current_user.email}")
-        
-        # Прямой SQL запрос
-        result = await db.execute(
-            select(Master).where(Master.user_id == current_user.id)
-        )
-        master = result.scalar_one_or_none()
-        
-        if not master:
-            return {"error": "No master found"}
-        
-        # Получаем все атрибуты модели
-        master_dict = {}
-        for column in master.__table__.columns:
-            value = getattr(master, column.name)
-            master_dict[column.name] = value
-            print(f"  {column.name}: {value} (SQL type: {column.type}, Python type: {type(value)})")
-        
-        # Проверяем атрибуты, которых может не быть в схеме
-        print("\n🔍 [DEBUG] Checking all master attributes:")
-        for attr_name in dir(master):
-            if not attr_name.startswith('_') and not callable(getattr(master, attr_name)):
-                attr_value = getattr(master, attr_name)
-                print(f"  {attr_name}: {attr_value} (type: {type(attr_value)})")
-        
-        return {
-            "master_id": str(master.id),
-            "raw_data": master_dict,
-            "table_columns": [col.name for col in master.__table__.columns]
-        }
-        
-    except Exception as e:
-        print(f"❌ [DEBUG] Error in debug_db_master: {e}")
-        import traceback
-        traceback.print_exc()
-        return {"error": str(e), "traceback": traceback.format_exc()}
