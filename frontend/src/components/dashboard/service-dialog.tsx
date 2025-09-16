@@ -47,7 +47,7 @@ export function ServiceDialog({ open, onOpenChange, service }: ServiceDialogProp
     mutationFn: (data: any) =>
       service
         ? updateService(service.id, data)
-        : createService(user?.tenant_id || '', data),
+        : createService(data, user?.tenant_id || ''),
     onSuccess: () => {
       toast({
         title: service ? 'Service Updated' : 'Service Created',
