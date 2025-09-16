@@ -46,8 +46,8 @@ app = FastAPI(
     description="SaaS Platform for Barbershops",
     version="1.0.0",
     lifespan=lifespan,
-    docs_url="/docs" if settings.DEBUG else None,
-    redoc_url="/redoc" if settings.DEBUG else None,
+    docs_url="/docs",#  if settings.DEBUG else None
+    redoc_url="/redoc",#  if settings.DEBUG else None
 )
 
 # Add middleware in correct order (ВАЖНО: порядок имеет значение!)
