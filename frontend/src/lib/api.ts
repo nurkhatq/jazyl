@@ -486,10 +486,13 @@ export const createService = async (serviceData: any, tenantId?: string) => {
   try {
     const config: any = {}
     
-    // ✅ ИСПРАВЛЕНО: Правильная отправка X-Tenant-ID как строки
     if (tenantId) {
       const tenantIdString = typeof tenantId === 'string' ? tenantId : String(tenantId)
-      config.headers = { 'X-Tenant-ID': tenantIdString }
+      // ✅ ИСПРАВЛЕНО: Правильное добавление заголовка
+      config.headers = {
+        ...config.headers,  // сохраняем существующие заголовки
+        'X-Tenant-ID': tenantIdString
+      }
       console.log('🔧 [createService] Setting X-Tenant-ID:', tenantIdString)
     }
     
