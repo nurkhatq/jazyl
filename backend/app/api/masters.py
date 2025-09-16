@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, func, case
 from typing import List, Optional
 from uuid import UUID
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from app.schemas.user import UserCreate
 from app.services.auth import AuthService
@@ -13,6 +13,7 @@ import string
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.models.master import Master, MasterSchedule
+from app.models.booking import Booking, BookingStatus
 from app.models.tenant import Tenant
 from app.utils.email import EmailService
 from app.schemas.master import MasterUpdate, MasterResponse, MasterPermissionsUpdate, MasterCreate
@@ -35,7 +36,7 @@ async def get_tenant_id_from_header(request: Request) -> Optional[UUID]:
     return None
 
 # ---------------------- PUBLIC ENDPOINTS для клиентов ----------------------
-@router.get("", response_model=List[MasterResponse])  # БЕЗ слеша
+@router.get("", response_model=List[MasterResponse])
 @router.get("/", response_model=List[MasterResponse], include_in_schema=False)
 async def get_masters(
     request: Request,
@@ -62,159 +63,6 @@ async def get_masters(
     masters = result.scalars().all()
     
     return masters
-
-# Добавьте этот эндпоинт в ваш masters.py после существующих эндпоинтов
-@router.post("", response_model=MasterResponse)
-@router.post("/", response_model=MasterResponse, include_in_schema=False)
-async def create_master(
-    master_data: MasterCreate,
-    request: Request,
-    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
-    db: AsyncSession = Depends(get_db)
-):
-    """Создать нового мастера (только для владельцев/админов)"""
-    tenant_id = await get_current_tenant(request, db)
-    
-    # Проверяем что создатель из того же тенанта
-    if current_user.tenant_id != tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
-    
-    user_id = master_data.user_id
-    
-    # Если user_id не указан, создаем нового пользователя
-    if not user_id and master_data.user_email:
-        # Проверяем что email не занят
-        result = await db.execute(
-            select(User).where(User.email == master_data.user_email)
-        )
-        existing_user = result.scalar_one_or_none()
-        
-        if existing_user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User with this email already exists"
-            )
-        
-        # Генерируем временный пароль
-        temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
-        
-        # Создаем пользователя
-        auth_service = AuthService(db)
-        user_data = UserCreate(
-            email=master_data.user_email,
-            first_name=master_data.user_first_name or "Master",
-            last_name=master_data.user_last_name or "",
-            phone=master_data.user_phone,
-            password=temp_password,
-            tenant_id=tenant_id,
-            role=UserRole.MASTER
-        )
-        
-        new_user = await auth_service.register_user(user_data)
-        if not new_user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to create user - email might already exist"
-            )
-        
-        user_id = new_user.id
-        
-        # Получаем информацию о тенанте для email
-        tenant_result = await db.execute(
-            select(Tenant).where(Tenant.id == tenant_id)
-        )
-        tenant = tenant_result.scalar_one_or_none()
-        barbershop_name = tenant.name if tenant else "Barbershop"
-        
-        # Отправляем приветственный email с учетными данными
-        try:
-            email_service = EmailService()
-            email_sent = await email_service.send_master_welcome_email(
-                to_email=master_data.user_email,
-                master_name=master_data.user_first_name or "Master",
-                barbershop_name=barbershop_name,
-                temp_password=temp_password  # Передаем временный пароль
-            )
-            
-            if email_sent:
-                print(f"✅ Welcome email sent successfully to {master_data.user_email}")
-                print(f"📧 Temporary password: {temp_password}")
-            else:
-                print(f"❌ Failed to send welcome email to {master_data.user_email}")
-                print(f"⚠️ Manual setup required - temp password: {temp_password}")
-                
-        except Exception as e:
-            print(f"❌ Exception sending welcome email: {e}")
-            print(f"⚠️ Manual setup required - temp password: {temp_password}")
-        
-    elif user_id:
-        # Проверяем что пользователь существует и является мастером
-        result = await db.execute(
-            select(User).where(
-                and_(
-                    User.id == user_id,
-                    User.tenant_id == tenant_id,
-                    User.role == UserRole.MASTER
-                )
-            )
-        )
-        user = result.scalar_one_or_none()
-        
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Master user not found in this tenant"
-            )
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Either user_id or user_email must be provided"
-        )
-    
-    # Создаем профиль мастера
-    master = Master(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        display_name=master_data.display_name,
-        description=master_data.description,
-        photo_url=master_data.photo_url,
-        specialization=master_data.specialization,
-        experience_years=0,
-        rating=0.0,
-        reviews_count=0,
-        is_active=True,
-        is_visible=True,
-        # Права по умолчанию
-        can_edit_profile=True,
-        can_edit_schedule=False,
-        can_edit_services=False,
-        can_manage_bookings=True,
-        can_view_analytics=True,
-        can_upload_photos=True
-    )
-    
-    db.add(master)
-    await db.commit()
-    await db.refresh(master)
-    
-    # Создаем расписание если указано
-    if master_data.schedules:
-        for schedule_data in master_data.schedules:
-            schedule = MasterSchedule(
-                master_id=master.id,
-                day_of_week=schedule_data.day_of_week,
-                start_time=schedule_data.start_time,
-                end_time=schedule_data.end_time,
-                is_working=schedule_data.is_working
-            )
-            db.add(schedule)
-        
-        await db.commit()
-    
-    return master
 
 @router.get("/{master_id}", response_model=MasterResponse)
 async def get_master(
@@ -258,35 +106,45 @@ async def get_my_profile(
     db: AsyncSession = Depends(get_db)
 ):
     """Получить свой профиль мастера с правами доступа"""
-    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
-    master = result.scalar_one_or_none()
-    
-    if not master:
-        # Создаем профиль мастера если его нет
-        master = Master(
-            tenant_id=current_user.tenant_id,
-            user_id=current_user.id,
-            display_name=f"{current_user.first_name} {current_user.last_name or ''}".strip(),
-            description="",
-            specialization=[],
-            rating=0.0,
-            reviews_count=0,
-            is_active=True,
-            is_visible=True,
-            # Права по умолчанию для нового мастера
-            can_edit_profile=True,
-            can_edit_schedule=False,
-            can_edit_services=False,
-            can_manage_bookings=True,
-            can_view_analytics=True,
-            can_upload_photos=True
+    try:
+        result = await db.execute(
+            select(Master).where(Master.user_id == current_user.id)
         )
+        master = result.scalar_one_or_none()
         
-        db.add(master)
-        await db.commit()
-        await db.refresh(master)
-    
-    return master
+        if not master:
+            # Создаем профиль мастера если его нет
+            master = Master(
+                tenant_id=current_user.tenant_id,
+                user_id=current_user.id,
+                display_name=f"{current_user.first_name} {current_user.last_name or ''}".strip(),
+                description="",
+                specialization=[],
+                rating=0.0,
+                reviews_count=0,
+                is_active=True,
+                is_visible=True,
+                # Права по умолчанию для нового мастера
+                can_edit_profile=True,
+                can_edit_schedule=False,
+                can_edit_services=False,
+                can_manage_bookings=True,
+                can_view_analytics=True,
+                can_upload_photos=True,
+                experience_years=0
+            )
+            
+            db.add(master)
+            await db.commit()
+            await db.refresh(master)
+        
+        return master
+    except Exception as e:
+        print(f"Error in get_my_profile: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get master profile"
+        )
 
 @router.put("/my-profile", response_model=MasterResponse)
 async def update_my_profile(
@@ -295,7 +153,9 @@ async def update_my_profile(
     db: AsyncSession = Depends(get_db)
 ):
     """Обновить свой профиль мастера"""
-    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
+    result = await db.execute(
+        select(Master).where(Master.user_id == current_user.id)
+    )
     master = result.scalar_one_or_none()
     
     if not master:
@@ -307,11 +167,10 @@ async def update_my_profile(
             detail="Profile editing permission required. Contact your manager."
         )
     
-    # Обновляем разрешенные поля
+    # Обновляем только переданные поля
     update_data = profile_data.dict(exclude_unset=True)
     for key, value in update_data.items():
-        if hasattr(master, key):
-            setattr(master, key, value)
+        setattr(master, key, value)
     
     master.updated_at = datetime.utcnow()
     await db.commit()
@@ -319,90 +178,246 @@ async def update_my_profile(
     
     return master
 
-@router.post("/upload-photo")
-async def upload_photo(
-    photo: UploadFile = File(...),
+# ==================== НОВЫЕ ИСПРАВЛЕННЫЕ ЭНДПОИНТЫ ====================
+
+@router.get("/my-stats")
+async def get_my_stats(
     current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
-    """Загрузить фото мастера"""
-    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
-    master = result.scalar_one_or_none()
-    
-    if not master:
-        raise HTTPException(status_code=404, detail="Master profile not found")
-    
-    if not master.can_upload_photos:
-        raise HTTPException(
-            status_code=403,
-            detail="Photo upload permission required. Contact your manager."
+    """Получить статистику мастера - ИСПРАВЛЕННЫЙ ЭНДПОИНТ"""
+    try:
+        # Находим профиль мастера
+        result = await db.execute(
+            select(Master).where(Master.user_id == current_user.id)
         )
-    
-    # Загружаем файл
-    upload_service = FileUploadService()
-    photo_url = await upload_service.upload_master_photo(photo, master.id)
-    
-    # Обновляем профиль
-    master.photo_url = photo_url
-    master.updated_at = datetime.utcnow()
-    await db.commit()
-    
-    return {"photo_url": photo_url}
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            # Если профиля нет, возвращаем нулевую статистику
+            return {
+                "weekBookings": 0,
+                "totalClients": 0,
+                "monthRevenue": 0.0,
+                "totalBookings": 0,
+                "completedBookings": 0,
+                "cancelledBookings": 0,
+                "cancellationRate": 0.0
+            }
+        
+        # Проверяем права доступа
+        if not master.can_view_analytics:
+            raise HTTPException(
+                status_code=403,
+                detail="Analytics viewing permission required. Contact your manager."
+            )
+        
+        # Рассчитываем периоды
+        now = datetime.now()
+        week_ago = now - timedelta(days=7)
+        month_ago = now - timedelta(days=30)
+        
+        # Запросы за неделю
+        week_bookings = await db.scalar(
+            select(func.count(Booking.id))
+            .where(and_(
+                Booking.master_id == master.id,
+                Booking.date >= week_ago,
+                Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.COMPLETED])
+            ))
+        ) or 0
+        
+        # Общее количество уникальных клиентов
+        total_clients = await db.scalar(
+            select(func.count(func.distinct(Booking.client_id)))
+            .where(and_(
+                Booking.master_id == master.id,
+                Booking.status == BookingStatus.COMPLETED
+            ))
+        ) or 0
+        
+        # Доход за месяц
+        month_revenue = await db.scalar(
+            select(func.coalesce(func.sum(Booking.price), 0))
+            .where(and_(
+                Booking.master_id == master.id,
+                Booking.date >= month_ago,
+                Booking.status == BookingStatus.COMPLETED
+            ))
+        ) or 0.0
+        
+        # Общая статистика записей
+        bookings_stats = await db.execute(
+            select(
+                func.count(Booking.id).label('total'),
+                func.count(case((Booking.status == BookingStatus.COMPLETED, 1))).label('completed'),
+                func.count(case((Booking.status == BookingStatus.CANCELLED, 1))).label('cancelled')
+            )
+            .where(Booking.master_id == master.id)
+        )
+        
+        stats = bookings_stats.first()
+        
+        # Рассчитываем процент отмен
+        cancellation_rate = 0.0
+        if stats.total > 0:
+            cancellation_rate = (stats.cancelled / stats.total) * 100
+        
+        return {
+            "weekBookings": int(week_bookings),
+            "totalClients": int(total_clients),
+            "monthRevenue": float(month_revenue),
+            "totalBookings": int(stats.total),
+            "completedBookings": int(stats.completed),
+            "cancelledBookings": int(stats.cancelled),
+            "cancellationRate": round(cancellation_rate, 2)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_my_stats: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get master statistics"
+        )
 
-@router.get("/my-analytics")
-async def get_my_analytics(
+@router.get("/my-bookings/today")
+async def get_my_bookings_today(
     current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
-    """Получить свою аналитику"""
-    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
-    master = result.scalar_one_or_none()
-    
-    if not master:
-        raise HTTPException(status_code=404, detail="Master profile not found")
-    
-    if not master.can_view_analytics:
-        raise HTTPException(
-            status_code=403,
-            detail="Analytics viewing permission required. Contact your manager."
+    """Получить записи мастера на сегодня - НОВЫЙ ЭНДПОИНТ"""
+    try:
+        # Находим профиль мастера
+        result = await db.execute(
+            select(Master).where(Master.user_id == current_user.id)
         )
-    
-    from app.models.booking import Booking, BookingStatus
-    from datetime import timedelta
-    
-    week_ago = datetime.now() - timedelta(days=7)
-    week_bookings = await db.scalar(
-        select(func.count(Booking.id))
-        .where(and_(
-            Booking.master_id == master.id,
-            Booking.date >= week_ago,
-            Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.COMPLETED])
-        ))
-    ) or 0
-    
-    total_clients = await db.scalar(
-        select(func.count(func.distinct(Booking.client_id)))
-        .where(and_(
-            Booking.master_id == master.id,
-            Booking.status == BookingStatus.COMPLETED
-        ))
-    ) or 0
-    
-    month_ago = datetime.now() - timedelta(days=30)
-    month_revenue = await db.scalar(
-        select(func.coalesce(func.sum(Booking.price), 0))
-        .where(and_(
-            Booking.master_id == master.id,
-            Booking.date >= month_ago,
-            Booking.status == BookingStatus.COMPLETED
-        ))
-    ) or 0
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            return {"bookings": []}
+        
+        # Проверяем права доступа к записям
+        if not master.can_manage_bookings:
+            raise HTTPException(
+                status_code=403,
+                detail="Booking management permission required. Contact your manager."
+            )
+        
+        # Получаем сегодняшнюю дату
+        today = date.today()
+        today_start = datetime.combine(today, datetime.min.time())
+        today_end = datetime.combine(today, datetime.max.time())
+        
+        # Получаем записи на сегодня
+        bookings_result = await db.execute(
+            select(Booking)
+            .where(and_(
+                Booking.master_id == master.id,
+                Booking.date >= today_start,
+                Booking.date <= today_end
+            ))
+            .order_by(Booking.date.asc())
+        )
+        
+        bookings = bookings_result.scalars().all()
+        
+        # Форматируем результат
+        formatted_bookings = []
+        for booking in bookings:
+            formatted_bookings.append({
+                "id": str(booking.id),
+                "client_name": booking.client_name,
+                "client_phone": booking.client_phone,
+                "service_name": booking.service_name,
+                "date": booking.date.isoformat(),
+                "duration": booking.duration,
+                "price": float(booking.price),
+                "status": booking.status.value,
+                "notes": booking.notes
+            })
+        
+        return {"bookings": formatted_bookings}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_my_bookings_today: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get today's bookings"
+        )
 
-    return {
-        "weekBookings": int(week_bookings),
-        "totalClients": int(total_clients),
-        "monthRevenue": float(month_revenue)
-    }
+@router.get("/my-bookings")
+async def get_my_bookings(
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+    status: Optional[BookingStatus] = Query(None),
+    current_user: User = Depends(get_current_master),
+    db: AsyncSession = Depends(get_db)
+):
+    """Получить записи мастера с фильтрами"""
+    try:
+        # Находим профиль мастера
+        result = await db.execute(
+            select(Master).where(Master.user_id == current_user.id)
+        )
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            return {"bookings": []}
+        
+        # Проверяем права доступа
+        if not master.can_manage_bookings:
+            raise HTTPException(
+                status_code=403,
+                detail="Booking management permission required. Contact your manager."
+            )
+        
+        # Строим запрос
+        query = select(Booking).where(Booking.master_id == master.id)
+        
+        # Применяем фильтры
+        if date_from:
+            query = query.where(Booking.date >= datetime.combine(date_from, datetime.min.time()))
+        if date_to:
+            query = query.where(Booking.date <= datetime.combine(date_to, datetime.max.time()))
+        if status:
+            query = query.where(Booking.status == status)
+        
+        query = query.order_by(Booking.date.asc())
+        
+        bookings_result = await db.execute(query)
+        bookings = bookings_result.scalars().all()
+        
+        # Форматируем результат
+        formatted_bookings = []
+        for booking in bookings:
+            formatted_bookings.append({
+                "id": str(booking.id),
+                "client_name": booking.client_name,
+                "client_phone": booking.client_phone,
+                "client_email": booking.client_email,
+                "service_name": booking.service_name,
+                "date": booking.date.isoformat(),
+                "duration": booking.duration,
+                "price": float(booking.price),
+                "status": booking.status.value,
+                "notes": booking.notes,
+                "created_at": booking.created_at.isoformat()
+            })
+        
+        return {"bookings": formatted_bookings}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_my_bookings: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get bookings"
+        )
 
 # ---------------------- Permission Requests ----------------------
 @router.post("/request-permission")
@@ -412,74 +427,94 @@ async def request_permission(
     db: AsyncSession = Depends(get_db)
 ):
     """Запросить разрешение у менеджера"""
-    permission_type = permission_data.get("permission_type")
-    reason = permission_data.get("reason", "")
-    additional_info = permission_data.get("additional_info")
-    
-    if not permission_type or not reason:
-        raise HTTPException(
-            status_code=400,
-            detail="permission_type and reason are required"
-        )
-    
     try:
-        permission_enum = PermissionRequestType(permission_type)
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid permission type: {permission_type}"
+        # Находим мастера
+        result = await db.execute(
+            select(Master).where(Master.user_id == current_user.id)
         )
-    
-    # Получаем мастера
-    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
-    master = result.scalar_one_or_none()
-    
-    if not master:
-        raise HTTPException(status_code=404, detail="Master profile not found")
-    
-    # Создаем запрос
-    permission_service = PermissionRequestService(db)
-    request = await permission_service.create_request(
-        master_id=master.id,
-        tenant_id=current_user.tenant_id,
-        permission_type=permission_enum,
-        reason=reason,
-        additional_info=additional_info
-    )
-    
-    return {
-        "message": f"Permission request for '{permission_type}' has been sent to your manager",
-        "request_id": str(request.id),
-        "status": "pending"
-    }
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            raise HTTPException(status_code=404, detail="Master profile not found")
+        
+        permission_type = permission_data.get("permission_type")
+        reason = permission_data.get("reason", "")
+        additional_info = permission_data.get("additional_info")
+        
+        if not permission_type:
+            raise HTTPException(
+                status_code=400,
+                detail="Permission type is required"
+            )
+        
+        # Проверяем валидность типа разрешения
+        try:
+            perm_type = PermissionRequestType(permission_type)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid permission type"
+            )
+        
+        permission_service = PermissionRequestService(db)
+        request_obj = await permission_service.create_request(
+            master.id,
+            perm_type,
+            reason,
+            additional_info
+        )
+        
+        return {
+            "id": str(request_obj.id),
+            "message": "Permission request submitted successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in request_permission: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create permission request"
+        )
 
 @router.get("/my-permission-requests")
 async def get_my_permission_requests(
     current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
-    """Получить мои запросы разрешений"""
-    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
-    master = result.scalar_one_or_none()
-    
-    if not master:
-        return []
-    
-    permission_service = PermissionRequestService(db)
-    requests = await permission_service.get_requests_for_master(master.id)
-    
-    return [
-        {
-            "id": str(req.id),
-            "permission_type": req.permission_type.value,
-            "reason": req.reason,
-            "status": req.status.value,
-            "created_at": req.created_at.isoformat(),
-            "reviewed_at": req.reviewed_at.isoformat() if req.reviewed_at else None,
-            "review_note": req.review_note
+    """Получить свои запросы разрешений"""
+    try:
+        # Находим мастера
+        result = await db.execute(
+            select(Master).where(Master.user_id == current_user.id)
+        )
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            return {"requests": []}
+        
+        permission_service = PermissionRequestService(db)
+        requests = await permission_service.get_requests_for_master(master.id)
+        
+        return {
+            "requests": [
+                {
+                    "id": str(req.id),
+                    "permission_type": req.permission_type.value,
+                    "reason": req.reason,
+                    "status": req.status.value,
+                    "created_at": req.created_at.isoformat(),
+                    "reviewed_at": req.reviewed_at.isoformat() if req.reviewed_at else None,
+                    "review_note": req.review_note
+                }
+                for req in requests
+            ]
         }
-        for req in requests
-    ]
+        
+    except Exception as e:
+        print(f"Error in get_my_permission_requests: {e}")
+        return {"requests": []}
 
 # ---------------------- Schedule management ----------------------
 @router.get("/my-schedule")
@@ -488,15 +523,27 @@ async def get_my_schedule(
     db: AsyncSession = Depends(get_db)
 ):
     """Получить свое расписание"""
-    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
-    master = result.scalar_one_or_none()
-    
-    if not master:
-        raise HTTPException(status_code=404, detail="Master profile not found")
-    
-    service = MasterService(db)
-    schedule = await service.get_schedule(master.id)
-    return schedule
+    try:
+        result = await db.execute(
+            select(Master).where(Master.user_id == current_user.id)
+        )
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            raise HTTPException(status_code=404, detail="Master profile not found")
+        
+        service = MasterService(db)
+        schedule = await service.get_schedule(master.id)
+        return {"schedule": schedule}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_my_schedule: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get schedule"
+        )
 
 @router.post("/block-time")
 async def block_my_time(
@@ -505,23 +552,59 @@ async def block_my_time(
     db: AsyncSession = Depends(get_db)
 ):
     """Заблокировать время"""
-    result = await db.execute(select(Master).where(Master.user_id == current_user.id))
-    master = result.scalar_one_or_none()
-    
-    if not master:
-        raise HTTPException(status_code=404, detail="Master profile not found")
-    
-    if not master.can_edit_schedule:
+    try:
+        result = await db.execute(
+            select(Master).where(Master.user_id == current_user.id)
+        )
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            raise HTTPException(status_code=404, detail="Master profile not found")
+        
+        if not master.can_edit_schedule:
+            raise HTTPException(
+                status_code=403,
+                detail="Schedule editing permission required. Contact your manager."
+            )
+        
+        service = MasterService(db)
+        block = await service.create_block_time(master.id, block_data)
+        return {"block": block}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in block_my_time: {e}")
         raise HTTPException(
-            status_code=403,
-            detail="Schedule editing permission required. Contact your manager."
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to block time"
+        )
+
+# ====================== АДМИНСКИЕ ЭНДПОИНТЫ ======================
+
+@router.post("", response_model=MasterResponse)
+@router.post("/", response_model=MasterResponse, include_in_schema=False)
+async def create_master(
+    master_data: MasterCreate,
+    request: Request,
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_db)
+):
+    """Создать нового мастера (только для владельцев/админов)"""
+    tenant_id = await get_current_tenant(request, db)
+    
+    # Проверяем что создатель из того же тенанта
+    if current_user.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
         )
     
     service = MasterService(db)
-    block = await service.create_block_time(master.id, block_data)
-    return block
+    master = await service.create_master(tenant_id, master_data.dict())
+    
+    return master
 
-# ---------------------- Admin endpoints for permissions ----------------------
 @router.get("/permission-requests")
 async def get_permission_requests(
     current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
@@ -555,14 +638,17 @@ async def approve_permission_request(
 ):
     """Одобрить запрос разрешения"""
     permission_service = PermissionRequestService(db)
-    success = await permission_service.approve_request(
-        request_id=request_id,
-        reviewer_id=current_user.id,
-        review_note=review_data.get("review_note")
+    result = await permission_service.approve_request(
+        request_id,
+        current_user.id,
+        review_data.get("review_note", "")
     )
     
-    if not success:
-        raise HTTPException(status_code=404, detail="Request not found or already processed")
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Permission request not found"
+        )
     
     return {"message": "Permission request approved"}
 
@@ -575,41 +661,51 @@ async def reject_permission_request(
 ):
     """Отклонить запрос разрешения"""
     permission_service = PermissionRequestService(db)
-    success = await permission_service.reject_request(
-        request_id=request_id,
-        reviewer_id=current_user.id,
-        review_note=review_data.get("review_note")
+    result = await permission_service.reject_request(
+        request_id,
+        current_user.id,
+        review_data.get("review_note", "")
     )
     
-    if not success:
-        raise HTTPException(status_code=404, detail="Request not found or already processed")
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Permission request not found"
+        )
     
     return {"message": "Permission request rejected"}
 
-@router.put("/{master_id}/permissions")
+@router.put("/{master_id}/permissions", response_model=MasterResponse)
 async def update_master_permissions(
     master_id: UUID,
     permissions_data: MasterPermissionsUpdate,
-    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
+    current_user: User = Depends(require_role([UserRole.OWNER])),
     db: AsyncSession = Depends(get_db)
 ):
     """Обновить права мастера (только для владельцев)"""
-    result = await db.execute(select(Master).where(Master.id == master_id))
+    result = await db.execute(
+        select(Master).where(
+            and_(
+                Master.id == master_id,
+                Master.tenant_id == current_user.tenant_id
+            )
+        )
+    )
     master = result.scalar_one_or_none()
     
     if not master:
-        raise HTTPException(status_code=404, detail="Master not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Master not found"
+        )
     
-    # Проверяем что мастер из того же тенанта
-    if master.tenant_id != current_user.tenant_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    # Обновляем права
+    # Обновляем только переданные права
     update_data = permissions_data.dict(exclude_unset=True)
     for key, value in update_data.items():
         setattr(master, key, value)
     
     master.updated_at = datetime.utcnow()
     await db.commit()
+    await db.refresh(master)
     
-    return {"message": "Permissions updated successfully"}
+    return master

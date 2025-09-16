@@ -139,86 +139,293 @@ export const updateTenant = async (tenantId: string, tenantData: any) => {
 
 // ====================== MASTERS API ======================
 export const getMasters = async (tenantId?: string) => {
-  const config: any = {}
-  
-  // Если tenantId передан явно, используем его
-  if (tenantId) {
-    config.headers = { 'X-Tenant-ID': tenantId }
+  try {
+    const config: any = {}
+    
+    if (tenantId) {
+      config.headers = { 'X-Tenant-ID': tenantId }
+    }
+    
+    const response = await api.get('/api/masters', config)
+    return response.data
+  } catch (error) {
+    console.error('Error getting masters:', error)
+    return []
   }
-  // Иначе interceptor автоматически добавит X-Tenant-Subdomain
-  
-  const response = await api.get('/api/masters', config)
-  return response.data
 }
 
-export const getMaster = async (masterId: string, tenantId?: string) => {
-  const config: any = {}
-  
-  if (tenantId) {
-    config.headers = { 'X-Tenant-ID': tenantId }
+/**
+ * Получить мастера по ID
+ */
+export const getMasterById = async (masterId: string, tenantId?: string) => {
+  try {
+    const config: any = {}
+    
+    if (tenantId) {
+      config.headers = { 'X-Tenant-ID': tenantId }
+    }
+    
+    const response = await api.get(`/api/masters/${masterId}`, config)
+    return response.data
+  } catch (error) {
+    console.error('Error getting master:', error)
+    throw error
   }
-  
-  const response = await api.get(`/api/masters/${masterId}`, config)
-  return response.data
 }
 
+/**
+ * Создать нового мастера
+ */
 export const createMaster = async (masterData: any, tenantId?: string) => {
-  const config: any = {}
-  
-  if (tenantId) {
-    config.headers = { 'X-Tenant-ID': tenantId }
+  try {
+    const config: any = {}
+    
+    if (tenantId) {
+      config.headers = { 'X-Tenant-ID': tenantId }
+    }
+    
+    const response = await api.post('/api/masters', masterData, config)
+    return response.data
+  } catch (error) {
+    console.error('Error creating master:', error)
+    throw error
   }
-  
-  const response = await api.post('/api/masters', masterData, config)
-  return response.data
 }
 
-export const updateMaster = async (masterId: string, masterData: any) => {
-  const response = await api.put(`/api/masters/${masterId}`, masterData)
-  return response.data
+/**
+ * Обновить права мастера (только для владельцев)
+ */
+export const updateMasterPermissions = async (masterId: string, permissions: {
+  can_edit_profile?: boolean;
+  can_edit_schedule?: boolean;
+  can_edit_services?: boolean;
+  can_manage_bookings?: boolean;
+  can_view_analytics?: boolean;
+  can_upload_photos?: boolean;
+}) => {
+  try {
+    const response = await api.put(`/api/masters/${masterId}/permissions`, permissions)
+    return response.data
+  } catch (error) {
+    console.error('Error updating master permissions:', error)
+    throw error
+  }
 }
 
-export const deleteMaster = async (masterId: string) => {
-  const response = await api.delete(`/api/masters/${masterId}`)
-  return response.data
+/**
+ * Получить запросы разрешений (для администраторов)
+ */
+export const getPermissionRequests = async () => {
+  try {
+    const response = await api.get('/api/masters/permission-requests')
+    return response.data
+  } catch (error) {
+    console.error('Error getting permission requests:', error)
+    return []
+  }
+}
+
+/**
+ * Одобрить запрос разрешения
+ */
+export const approvePermissionRequest = async (requestId: string, reviewNote?: string) => {
+  try {
+    const response = await api.put(`/api/masters/permission-requests/${requestId}/approve`, {
+      review_note: reviewNote || ''
+    })
+    return response.data
+  } catch (error) {
+    console.error('Error approving permission request:', error)
+    throw error
+  }
+}
+
+/**
+ * Отклонить запрос разрешения
+ */
+export const rejectPermissionRequest = async (requestId: string, reviewNote?: string) => {
+  try {
+    const response = await api.put(`/api/masters/permission-requests/${requestId}/reject`, {
+      review_note: reviewNote || ''
+    })
+    return response.data
+  } catch (error) {
+    console.error('Error rejecting permission request:', error)
+    throw error
+  }
 }
 
 // ====================== MASTER PROFILE API (для мастеров) ======================
+/**
+ * Получить свой профиль мастера
+ */
 export const getMyProfile = async () => {
-  const response = await api.get('/api/masters/my-profile')
-  return response.data
+  try {
+    const response = await api.get('/api/masters/my-profile')
+    return response.data
+  } catch (error) {
+    console.error('Error getting master profile:', error)
+    throw error
+  }
 }
 
+/**
+ * Обновить свой профиль мастера
+ */
 export const updateMyProfile = async (profileData: any) => {
-  const response = await api.put('/api/masters/my-profile', profileData)
-  return response.data
+  try {
+    const response = await api.put('/api/masters/my-profile', profileData)
+    return response.data
+  } catch (error) {
+    console.error('Error updating master profile:', error)
+    throw error
+  }
 }
 
+/**
+ * Получить статистику мастера - ИСПРАВЛЕННЫЙ ЭНДПОИНТ
+ */
+export const getMyStats = async () => {
+  try {
+    const response = await api.get('/api/masters/my-stats')
+    return response.data
+  } catch (error) {
+    console.error('Error getting master stats:', error)
+    // Возвращаем заглушку в случае ошибки
+    return {
+      weekBookings: 0,
+      totalClients: 0,
+      monthRevenue: 0,
+      totalBookings: 0,
+      completedBookings: 0,
+      cancelledBookings: 0,
+      cancellationRate: 0
+    }
+  }
+}
+
+/**
+ * Получить записи мастера на сегодня - НОВЫЙ ЭНДПОИНТ
+ */
+export const getMyBookingsToday = async () => {
+  try {
+    const response = await api.get('/api/masters/my-bookings/today')
+    return response.data
+  } catch (error) {
+    console.error('Error getting today bookings:', error)
+    // Возвращаем пустой массив в случае ошибки
+    return { bookings: [] }
+  }
+}
+
+/**
+ * Получить записи мастера с фильтрами - НОВЫЙ ЭНДПОИНТ
+ */
+export const getMyBookings = async (filters?: {
+  date_from?: string;
+  date_to?: string;
+  status?: string;
+}) => {
+  try {
+    const params = new URLSearchParams()
+    
+    if (filters?.date_from) {
+      params.append('date_from', filters.date_from)
+    }
+    if (filters?.date_to) {
+      params.append('date_to', filters.date_to)
+    }
+    if (filters?.status) {
+      params.append('status', filters.status)
+    }
+    
+    const response = await api.get(`/api/masters/my-bookings?${params.toString()}`)
+    return response.data
+  } catch (error) {
+    console.error('Error getting master bookings:', error)
+    return { bookings: [] }
+  }
+}
+
+/**
+ * Загрузить фото мастера
+ */
 export const uploadMasterPhoto = async (photo: File) => {
-  const formData = new FormData()
-  formData.append('photo', photo)
-  
-  const response = await api.post('/api/masters/upload-photo', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  })
-  return response.data
+  try {
+    const formData = new FormData()
+    formData.append('photo', photo)
+    
+    const response = await api.post('/api/masters/upload-photo', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    })
+    return response.data
+  } catch (error) {
+    console.error('Error uploading master photo:', error)
+    throw error
+  }
 }
 
-export const getMyAnalytics = async () => {
-  const response = await api.get('/api/masters/my-analytics')
-  return response.data
+/**
+ * Запросить разрешение у менеджера
+ */
+export const requestPermission = async (permissionData: {
+  permission_type: string;
+  reason: string;
+  additional_info?: string;
+}) => {
+  try {
+    const response = await api.post('/api/masters/request-permission', permissionData)
+    return response.data
+  } catch (error) {
+    console.error('Error requesting permission:', error)
+    throw error
+  }
 }
 
-export const requestPermission = async (permissionData: any) => {
-  const response = await api.post('/api/masters/request-permission', permissionData)
-  return response.data
-}
-
+/**
+ * Получить свои запросы разрешений
+ */
 export const getMyPermissionRequests = async () => {
-  const response = await api.get('/api/masters/my-permission-requests')
-  return response.data
+  try {
+    const response = await api.get('/api/masters/my-permission-requests')
+    return response.data
+  } catch (error) {
+    console.error('Error getting permission requests:', error)
+    return { requests: [] }
+  }
+}
+
+/**
+ * Получить свое расписание
+ */
+export const getMySchedule = async () => {
+  try {
+    const response = await api.get('/api/masters/my-schedule')
+    return response.data
+  } catch (error) {
+    console.error('Error getting master schedule:', error)
+    return { schedule: [] }
+  }
+}
+
+/**
+ * Заблокировать время в расписании
+ */
+export const blockMyTime = async (blockData: {
+  date: string;
+  start_time: string;
+  end_time: string;
+  reason?: string;
+}) => {
+  try {
+    const response = await api.post('/api/masters/block-time', blockData)
+    return response.data
+  } catch (error) {
+    console.error('Error blocking time:', error)
+    throw error
+  }
 }
 
 // ====================== SERVICES API ======================
@@ -311,7 +518,80 @@ export const getAvailableSlots = async (
   const response = await api.get('/api/bookings/availability/slots', config)
   return response.data
 }
+// ====================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ======================
 
+/**
+ * Типы разрешений для запросов
+ */
+export const PERMISSION_TYPES = {
+  EDIT_SCHEDULE: 'edit_schedule',
+  EDIT_SERVICES: 'edit_services',
+  VIEW_ANALYTICS: 'view_analytics',
+  UPLOAD_PHOTOS: 'upload_photos'
+} as const
+
+/**
+ * Статусы записей
+ */
+export const BOOKING_STATUSES = {
+  PENDING: 'pending',
+  CONFIRMED: 'confirmed',
+  COMPLETED: 'completed',
+  CANCELLED: 'cancelled',
+  NO_SHOW: 'no_show'
+} as const
+
+/**
+ * Проверить, есть ли у мастера конкретное разрешение
+ */
+export const hasPermission = (masterProfile: any, permission: keyof typeof PERMISSION_TYPES): boolean => {
+  const permissionMap = {
+    EDIT_SCHEDULE: 'can_edit_schedule',
+    EDIT_SERVICES: 'can_edit_services',
+    VIEW_ANALYTICS: 'can_view_analytics',
+    UPLOAD_PHOTOS: 'can_upload_photos'
+  }
+  
+  const fieldName = permissionMap[permission]
+  return masterProfile?.[fieldName] === true
+}
+
+/**
+ * Форматировать статистику для отображения
+ */
+export const formatMasterStats = (stats: any) => {
+  return {
+    weekBookings: stats?.weekBookings || 0,
+    totalClients: stats?.totalClients || 0,
+    monthRevenue: stats?.monthRevenue ? `${stats.monthRevenue.toFixed(2)} ₽` : '0.00 ₽',
+    totalBookings: stats?.totalBookings || 0,
+    completedBookings: stats?.completedBookings || 0,
+    cancelledBookings: stats?.cancelledBookings || 0,
+    cancellationRate: stats?.cancellationRate ? `${stats.cancellationRate}%` : '0%'
+  }
+}
+
+/**
+ * Проверить, нужно ли показать уведомление о недостающих правах
+ */
+export const checkMissingPermissions = (masterProfile: any): string[] => {
+  const missing = []
+  
+  if (!masterProfile?.can_edit_schedule) {
+    missing.push('Редактирование расписания')
+  }
+  if (!masterProfile?.can_edit_services) {
+    missing.push('Редактирование услуг')
+  }
+  if (!masterProfile?.can_view_analytics) {
+    missing.push('Просмотр аналитики')
+  }
+  if (!masterProfile?.can_upload_photos) {
+    missing.push('Загрузка фотографий')
+  }
+  
+  return missing
+}
 export const createBooking = async (bookingData: any, tenantId?: string) => {
   const config: any = {}
   
