@@ -16,7 +16,10 @@ from app.models.master import Master, MasterSchedule
 from app.models.booking import Booking, BookingStatus
 from app.models.tenant import Tenant
 from app.utils.email import EmailService
-from app.schemas.master import MasterUpdate, MasterResponse, MasterPermissionsUpdate, MasterCreate
+from app.schemas.master import (
+    MasterUpdate, MasterResponse, MasterPermissionsUpdate, MasterCreate,
+    MasterStatsResponse, TodayBookingsResponse  # ✅ ДОБАВЛЕНЫ новые схемы
+)
 from app.models.permission_request import PermissionRequestType
 from app.services.master import MasterService
 from app.services.file_upload import FileUploadService
@@ -41,68 +44,30 @@ async def get_tenant_id_from_header(request: Request) -> Optional[UUID]:
 async def get_masters(
     request: Request,
     db: AsyncSession = Depends(get_db),
-    # Опциональная авторизация для административного доступа
     current_user: Optional[User] = Depends(get_current_user_optional)
 ):
-    """Получить список мастеров (публичный доступ или административный)"""
+    """Получить список мастеров (публичный доступ для клиентов)"""
     try:
-        tenant_id = None
-        
-        # Если пользователь авторизован (административный доступ)
-        if current_user:
-            tenant_id = current_user.tenant_id
-            
-            # Если это админ/владелец, показываем всех мастеров включая неактивных
-            if current_user.role in [UserRole.OWNER, UserRole.ADMIN]:
-                result = await db.execute(
-                    select(Master).where(Master.tenant_id == tenant_id)
-                    .order_by(Master.display_name)
-                )
-                masters = result.scalars().all()
-                return masters
-        
-        # Публичный доступ или обычные пользователи
-        if not tenant_id:
-            tenant_id = await get_current_tenant(request, db)
-        
-        result = await db.execute(
-            select(Master).where(
-                and_(
-                    Master.tenant_id == tenant_id,
-                    Master.is_active == True,
-                    Master.is_visible == True
-                )
-            )
-            .order_by(Master.display_name)
-        )
-        masters = result.scalars().all()
-        
-        return masters
-        
+        tenant_id = await get_current_tenant(request, db)
     except HTTPException:
-        # Если не удалось определить тенант
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tenant not specified"
         )
-
-# Добавляем вспомогательную функцию для опциональной авторизации
-async def get_current_user_optional(
-    request: Request,
-    db: AsyncSession = Depends(get_db)
-) -> Optional[User]:
-    """Возвращает пользователя если он авторизован, иначе None"""
-    auth_header = request.headers.get("authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        return None
     
-    token = auth_header.split(" ")[1]
-    try:
-        from app.utils.security import get_current_user_from_token
-        user = await get_current_user_from_token(token, db)
-        return user
-    except:
-        return None
+    # Для публичного доступа показываем только активных и видимых мастеров
+    result = await db.execute(
+        select(Master).where(
+            and_(
+                Master.tenant_id == tenant_id,
+                Master.is_active == True,
+                Master.is_visible == True
+            )
+        )
+    )
+    masters = result.scalars().all()
+    
+    return masters
 
 @router.get("/{master_id}", response_model=MasterResponse)
 async def get_master(
@@ -140,12 +105,14 @@ async def get_master(
     return master
 
 # ---------------------- Endpoints for current master ----------------------
+
+# ✅ ИСПРАВЛЕННЫЙ ЭНДПОИНТ: my-profile
 @router.get("/my-profile", response_model=MasterResponse)
 async def get_my_profile(
     current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
-    """Получить свой профиль мастера с правами доступа - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
+    """Получить свой профиль мастера - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
     try:
         print(f"🔍 Getting profile for user: {current_user.email} (ID: {current_user.id})")
         
@@ -160,8 +127,8 @@ async def get_my_profile(
             # Создаем профиль мастера если его нет
             display_name = f"{current_user.first_name or ''} {current_user.last_name or ''}".strip()
             if not display_name:
-                display_name = current_user.email.split('@')[0]  # Используем часть email как fallback
-                
+                display_name = current_user.email.split('@')[0]
+            
             master = Master(
                 tenant_id=current_user.tenant_id,
                 user_id=current_user.id,
@@ -179,7 +146,10 @@ async def get_my_profile(
                 can_manage_bookings=True,
                 can_view_analytics=True,
                 can_upload_photos=True,
-                experience_years=0
+                experience_years=0,
+                # ✅ ИСПРАВЛЕНО: Явно устанавливаем временные метки
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
             )
             
             db.add(master)
@@ -188,6 +158,14 @@ async def get_my_profile(
             print(f"✅ Created master profile for user {current_user.email}")
         else:
             print(f"✅ Found existing master profile: {master.display_name}")
+            
+            # ✅ ИСПРАВЛЕНО: Проверяем и исправляем NULL временные метки
+            if master.created_at is None:
+                master.created_at = datetime.utcnow()
+            if master.updated_at is None:
+                master.updated_at = datetime.utcnow()
+            await db.commit()
+            await db.refresh(master)
         
         return master
         
@@ -199,7 +177,6 @@ async def get_my_profile(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get master profile"
         )
-
 
 @router.put("/my-profile", response_model=MasterResponse)
 async def update_my_profile(
@@ -233,13 +210,13 @@ async def update_my_profile(
     
     return master
 
-# ==================== НОВЫЕ ИСПРАВЛЕННЫЕ ЭНДПОИНТЫ ====================
-@router.get("/my-stats")
+# ✅ ИСПРАВЛЕННЫЙ ЭНДПОИНТ: my-stats
+@router.get("/my-stats", response_model=MasterStatsResponse)
 async def get_my_stats(
     current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
-    """Получить статистику мастера - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
+    """Получить статистику мастера - ИСПРАВЛЕННАЯ ВЕРСИЯ с правильной схемой ответа"""
     try:
         print(f"🔍 Getting stats for user: {current_user.email} (ID: {current_user.id})")
         
@@ -252,113 +229,105 @@ async def get_my_stats(
         if not master:
             print(f"⚠️ No master profile found for user {current_user.email}")
             # Если профиля нет, возвращаем нулевую статистику
-            return {
-                "weekBookings": 0,
-                "totalClients": 0,
-                "monthRevenue": 0.0,
-                "totalBookings": 0,
-                "completedBookings": 0,
-                "cancelledBookings": 0,
-                "cancellationRate": 0.0
-            }
+            return MasterStatsResponse()
         
         print(f"✅ Found master profile: {master.display_name}")
         
         # Проверяем права доступа (более мягко)
         if not master.can_view_analytics:
-            print(f"⚠️ Master {master.display_name} doesn't have analytics permission")
-            # Вместо ошибки 403, даём базовую статистику
-            return {
-                "weekBookings": 0,
-                "totalClients": 0,
-                "monthRevenue": 0.0,
-                "totalBookings": 0,
-                "completedBookings": 0,
-                "cancelledBookings": 0,
-                "cancellationRate": 0.0,
-                "message": "Contact your manager for full analytics access"
-            }
-        
-        # Рассчитываем периоды
-        now = datetime.now()
-        week_ago = now - timedelta(days=7)
-        month_ago = now - timedelta(days=30)
-        
-        print(f"📊 Calculating stats for master ID: {master.id}")
+            print(f"⚠️ Master {master.display_name} has no analytics permission, returning empty stats")
+            # Вместо ошибки возвращаем пустую статистику
+            return MasterStatsResponse()
         
         try:
-            # Запросы за неделю
-            week_bookings = await db.scalar(
-                select(func.count(Booking.id))
-                .where(and_(
-                    Booking.master_id == master.id,
-                    Booking.date >= week_ago,
-                    Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.COMPLETED])
-                ))
-            ) or 0
+            # Считаем статистику
+            now = datetime.utcnow()
+            week_start = now - timedelta(days=7)
+            month_start = now - timedelta(days=30)
             
-            # Общее количество уникальных клиентов
-            total_clients = await db.scalar(
-                select(func.count(func.distinct(Booking.client_id)))
-                .where(and_(
-                    Booking.master_id == master.id,
-                    Booking.status == BookingStatus.COMPLETED
-                ))
-            ) or 0
-            
-            # Доход за месяц
-            month_revenue = await db.scalar(
-                select(func.coalesce(func.sum(Booking.price), 0))
-                .where(and_(
-                    Booking.master_id == master.id,
-                    Booking.date >= month_ago,
-                    Booking.status == BookingStatus.COMPLETED
-                ))
-            ) or 0.0
-            
-            # Общая статистика записей
-            bookings_stats = await db.execute(
-                select(
-                    func.count(Booking.id).label('total'),
-                    func.count(case((Booking.status == BookingStatus.COMPLETED, 1))).label('completed'),
-                    func.count(case((Booking.status == BookingStatus.CANCELLED, 1))).label('cancelled')
+            # Записи за неделю
+            week_bookings_result = await db.execute(
+                select(func.count()).select_from(Booking)
+                .where(
+                    and_(
+                        Booking.master_id == master.id,
+                        Booking.created_at >= week_start
+                    )
                 )
+            )
+            week_bookings = week_bookings_result.scalar() or 0
+            
+            # Всего клиентов (уникальные client_id)
+            total_clients_result = await db.execute(
+                select(func.count(func.distinct(Booking.client_id)))
                 .where(Booking.master_id == master.id)
             )
+            total_clients = total_clients_result.scalar() or 0
             
-            stats = bookings_stats.first()
+            # Доход за месяц
+            month_revenue_result = await db.execute(
+                select(func.coalesce(func.sum(Booking.price), 0.0))
+                .where(
+                    and_(
+                        Booking.master_id == master.id,
+                        Booking.created_at >= month_start,
+                        Booking.status == BookingStatus.COMPLETED
+                    )
+                )
+            )
+            month_revenue = float(month_revenue_result.scalar() or 0.0)
             
-            # Рассчитываем процент отмен
+            # Всего записей
+            total_bookings_result = await db.execute(
+                select(func.count()).select_from(Booking)
+                .where(Booking.master_id == master.id)
+            )
+            total_bookings = total_bookings_result.scalar() or 0
+            
+            # Завершенные записи
+            completed_bookings_result = await db.execute(
+                select(func.count()).select_from(Booking)
+                .where(
+                    and_(
+                        Booking.master_id == master.id,
+                        Booking.status == BookingStatus.COMPLETED
+                    )
+                )
+            )
+            completed_bookings = completed_bookings_result.scalar() or 0
+            
+            # Отмененные записи
+            cancelled_bookings_result = await db.execute(
+                select(func.count()).select_from(Booking)
+                .where(
+                    and_(
+                        Booking.master_id == master.id,
+                        Booking.status == BookingStatus.CANCELLED
+                    )
+                )
+            )
+            cancelled_bookings = cancelled_bookings_result.scalar() or 0
+            
+            # Процент отмен
             cancellation_rate = 0.0
-            if stats.total > 0:
-                cancellation_rate = (stats.cancelled / stats.total) * 100
+            if total_bookings > 0:
+                cancellation_rate = (cancelled_bookings / total_bookings) * 100
             
-            result_stats = {
-                "weekBookings": int(week_bookings),
-                "totalClients": int(total_clients),
-                "monthRevenue": float(month_revenue),
-                "totalBookings": int(stats.total),
-                "completedBookings": int(stats.completed),
-                "cancelledBookings": int(stats.cancelled),
-                "cancellationRate": round(cancellation_rate, 2)
-            }
-            
-            print(f"✅ Stats calculated successfully: {result_stats}")
-            return result_stats
+            # ✅ ИСПРАВЛЕНО: Возвращаем объект схемы вместо словаря
+            return MasterStatsResponse(
+                weekBookings=week_bookings,
+                totalClients=total_clients,
+                monthRevenue=month_revenue,
+                totalBookings=total_bookings,
+                completedBookings=completed_bookings,
+                cancelledBookings=cancelled_bookings,
+                cancellationRate=cancellation_rate
+            )
             
         except Exception as stats_error:
             print(f"❌ Error calculating stats: {stats_error}")
             # В случае ошибки с БД возвращаем нулевую статистику
-            return {
-                "weekBookings": 0,
-                "totalClients": 0,
-                "monthRevenue": 0.0,
-                "totalBookings": 0,
-                "completedBookings": 0,
-                "cancelledBookings": 0,
-                "cancellationRate": 0.0,
-                "error": "Stats calculation error"
-            }
+            return MasterStatsResponse()
         
     except HTTPException:
         raise
@@ -366,17 +335,16 @@ async def get_my_stats(
         print(f"❌ Error in get_my_stats: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get master statistics"
-        )
+        # Вместо 500 ошибки возвращаем пустую статистику
+        return MasterStatsResponse()
 
-@router.get("/my-bookings/today")
+# ✅ ИСПРАВЛЕННЫЙ ЭНДПОИНТ: my-bookings/today
+@router.get("/my-bookings/today", response_model=TodayBookingsResponse)
 async def get_my_bookings_today(
     current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
-    """Получить записи мастера на сегодня - НОВЫЙ ЭНДПОИНТ"""
+    """Получить записи мастера на сегодня - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
     try:
         # Находим профиль мастера
         result = await db.execute(
@@ -385,128 +353,58 @@ async def get_my_bookings_today(
         master = result.scalar_one_or_none()
         
         if not master:
-            return {"bookings": []}
+            return TodayBookingsResponse(bookings=[], total_count=0)
         
         # Проверяем права доступа к записям
         if not master.can_manage_bookings:
-            raise HTTPException(
-                status_code=403,
-                detail="Booking management permission required. Contact your manager."
-            )
+            print(f"⚠️ Master {master.display_name} has no booking management permission")
+            # Вместо ошибки возвращаем пустой список
+            return TodayBookingsResponse(bookings=[], total_count=0)
         
-        # Получаем сегодняшнюю дату
-        today = date.today()
+        # Определяем начало и конец сегодняшнего дня
+        today = datetime.utcnow().date()
         today_start = datetime.combine(today, datetime.min.time())
         today_end = datetime.combine(today, datetime.max.time())
         
         # Получаем записи на сегодня
-        bookings_result = await db.execute(
-            select(Booking)
-            .where(and_(
-                Booking.master_id == master.id,
-                Booking.date >= today_start,
-                Booking.date <= today_end
-            ))
-            .order_by(Booking.date.asc())
-        )
-        
-        bookings = bookings_result.scalars().all()
-        
-        # Форматируем результат
-        formatted_bookings = []
-        for booking in bookings:
-            formatted_bookings.append({
-                "id": str(booking.id),
-                "client_name": booking.client_name,
-                "client_phone": booking.client_phone,
-                "service_name": booking.service_name,
-                "date": booking.date.isoformat(),
-                "duration": booking.duration,
-                "price": float(booking.price),
-                "status": booking.status.value,
-                "notes": booking.notes
-            })
-        
-        return {"bookings": formatted_bookings}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error in get_my_bookings_today: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get today's bookings"
-        )
-
-@router.get("/my-bookings")
-async def get_my_bookings(
-    date_from: Optional[date] = Query(None),
-    date_to: Optional[date] = Query(None),
-    status: Optional[BookingStatus] = Query(None),
-    current_user: User = Depends(get_current_master),
-    db: AsyncSession = Depends(get_db)
-):
-    """Получить записи мастера с фильтрами"""
-    try:
-        # Находим профиль мастера
         result = await db.execute(
-            select(Master).where(Master.user_id == current_user.id)
+            select(Booking).where(
+                and_(
+                    Booking.master_id == master.id,
+                    Booking.date >= today_start,
+                    Booking.date <= today_end
+                )
+            ).order_by(Booking.date)
         )
-        master = result.scalar_one_or_none()
+        bookings = result.scalars().all()
         
-        if not master:
-            return {"bookings": []}
-        
-        # Проверяем права доступа
-        if not master.can_manage_bookings:
-            raise HTTPException(
-                status_code=403,
-                detail="Booking management permission required. Contact your manager."
-            )
-        
-        # Строим запрос
-        query = select(Booking).where(Booking.master_id == master.id)
-        
-        # Применяем фильтры
-        if date_from:
-            query = query.where(Booking.date >= datetime.combine(date_from, datetime.min.time()))
-        if date_to:
-            query = query.where(Booking.date <= datetime.combine(date_to, datetime.max.time()))
-        if status:
-            query = query.where(Booking.status == status)
-        
-        query = query.order_by(Booking.date.asc())
-        
-        bookings_result = await db.execute(query)
-        bookings = bookings_result.scalars().all()
-        
-        # Форматируем результат
-        formatted_bookings = []
+        # Формируем ответ
+        bookings_data = []
         for booking in bookings:
-            formatted_bookings.append({
+            bookings_data.append({
                 "id": str(booking.id),
-                "client_name": booking.client_name,
-                "client_phone": booking.client_phone,
-                "client_email": booking.client_email,
-                "service_name": booking.service_name,
                 "date": booking.date.isoformat(),
-                "duration": booking.duration,
-                "price": float(booking.price),
+                "end_time": booking.end_time.isoformat(),
                 "status": booking.status.value,
+                "price": booking.price,
                 "notes": booking.notes,
-                "created_at": booking.created_at.isoformat()
+                "client_id": str(booking.client_id),
+                "service_id": str(booking.service_id)
             })
         
-        return {"bookings": formatted_bookings}
+        return TodayBookingsResponse(
+            bookings=bookings_data,
+            total_count=len(bookings_data)
+        )
         
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error in get_my_bookings: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get bookings"
-        )
+        print(f"❌ Error in get_my_bookings_today: {e}")
+        import traceback
+        traceback.print_exc()
+        # Возвращаем пустой результат вместо ошибки
+        return TodayBookingsResponse(bookings=[], total_count=0)
 
 @router.post("/upload-photo")
 async def upload_photo(

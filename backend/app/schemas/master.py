@@ -55,11 +55,12 @@ class MasterPermissionsUpdate(BaseModel):
     can_view_analytics: Optional[bool] = None
     can_upload_photos: Optional[bool] = None
 
+# ✅ ИСПРАВЛЕНО: Схема ответа для профиля мастера
 class MasterResponse(BaseModel):
     id: UUID
     tenant_id: UUID
     user_id: UUID
-    display_name: Optional[str] = None
+    display_name: Optional[str] = None  # Может быть None
     description: Optional[str] = None
     photo_url: Optional[str] = None
     specialization: List[str] = []
@@ -77,9 +78,31 @@ class MasterResponse(BaseModel):
     can_view_analytics: bool = True
     can_upload_photos: bool = True
     
-    created_at: datetime
-    updated_at: datetime
+    # ✅ ИСПРАВЛЕНО: Временные метки могут быть None если не установлены в базе
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
+    class Config:
+        from_attributes = True
+
+# ✅ НОВАЯ СХЕМА: Для статистики мастера
+class MasterStatsResponse(BaseModel):
+    weekBookings: int = 0
+    totalClients: int = 0
+    monthRevenue: float = 0.0
+    totalBookings: int = 0
+    completedBookings: int = 0
+    cancelledBookings: int = 0
+    cancellationRate: float = 0.0
+    
+    class Config:
+        from_attributes = True
+
+# ✅ НОВАЯ СХЕМА: Для сегодняшних записей
+class TodayBookingsResponse(BaseModel):
+    bookings: List[Dict[str, Any]] = []
+    total_count: int = 0
+    
     class Config:
         from_attributes = True
 
@@ -95,8 +118,8 @@ class MasterProfileResponse(BaseModel):
     reviews_count: int = 0
     is_active: bool = True
     is_visible: bool = True
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True
