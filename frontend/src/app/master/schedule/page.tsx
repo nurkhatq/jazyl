@@ -52,13 +52,12 @@ export default function MasterSchedulePage() {
 
   // Получаем расписание мастера
   const { data: schedule } = useQuery({
-    queryKey: ['master-schedule', masterInfo?.id],
+    queryKey: ['master-schedule', user?.id],
     queryFn: async () => {
-      if (!masterInfo?.id) return null
-      const response = await api.get(`/api/masters/${masterInfo.id}/schedule`)
+      const response = await api.get('/api/masters/my-schedule')
       return response.data
     },
-    enabled: !!masterInfo?.id
+    enabled: !!user?.id
   })
 
   // Получаем записи на выбранную дату
@@ -81,7 +80,7 @@ export default function MasterSchedulePage() {
   // Блокировка времени
   const blockTimeMutation = useMutation({
     mutationFn: async (data: any) => {
-      const response = await api.post(`/api/masters/${masterInfo?.id}/block-time`, {
+      const response = await api.post('/api/masters/block-time', {
         ...data,
         start_time: `${format(selectedDate, 'yyyy-MM-dd')} ${data.start_time}:00`,
         end_time: `${format(selectedDate, 'yyyy-MM-dd')} ${data.end_time}:00`,
