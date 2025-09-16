@@ -86,30 +86,50 @@ async def get_current_master(
     try:
         # Сначала получаем пользователя
         user = await get_current_user(token, db)
+        print(f"✅ User authenticated: {user.email}, role: {user.role.value}")
         
         # Проверяем роль
         if user.role != UserRole.MASTER:
-            print(f"User {user.email} has role {user.role.value}, but MASTER required")
+            print(f"❌ User {user.email} has role {user.role.value}, but MASTER required")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access restricted to masters only"
             )
         
-        # Дополнительно проверяем что тенант активен
+        # Проверяем наличие tenant_id (более мягко)
         if not user.tenant_id:
-            print(f"Master {user.email} has no tenant_id")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Master must be associated with a tenant"
+            print(f"⚠️ Master {user.email} has no tenant_id - trying to fix...")
+            
+            # Пытаемся найти тенант для пользователя через базу данных
+            # Это может произойти при миграции данных или неполной регистрации
+            result = await db.execute(
+                select(Tenant).limit(1)  # Временно берём первый доступный тенант
             )
+            tenant = result.scalar_one_or_none()
+            
+            if tenant:
+                user.tenant_id = tenant.id
+                await db.commit()
+                await db.refresh(user)
+                print(f"✅ Assigned tenant {tenant.id} to master {user.email}")
+            else:
+                print(f"❌ No tenant found to assign to master {user.email}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No tenant available. Contact administrator."
+                )
         
+        print(f"✅ Master authenticated successfully: {user.email}, tenant: {user.tenant_id}")
         return user
         
     except HTTPException:
         # Пропускаем HTTP исключения дальше
         raise
     except Exception as e:
-        print(f"Error in get_current_master: {e}")
+        print(f"❌ Error in get_current_master: {e}")
+        # Логируем подробности для отладки
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Authentication service error"

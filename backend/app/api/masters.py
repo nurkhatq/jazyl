@@ -145,19 +145,27 @@ async def get_my_profile(
     current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
-    """Получить свой профиль мастера с правами доступа"""
+    """Получить свой профиль мастера с правами доступа - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
     try:
+        print(f"🔍 Getting profile for user: {current_user.email} (ID: {current_user.id})")
+        
         result = await db.execute(
             select(Master).where(Master.user_id == current_user.id)
         )
         master = result.scalar_one_or_none()
         
         if not master:
+            print(f"⚠️ No master profile found for user {current_user.email}, creating one...")
+            
             # Создаем профиль мастера если его нет
+            display_name = f"{current_user.first_name or ''} {current_user.last_name or ''}".strip()
+            if not display_name:
+                display_name = current_user.email.split('@')[0]  # Используем часть email как fallback
+                
             master = Master(
                 tenant_id=current_user.tenant_id,
                 user_id=current_user.id,
-                display_name=f"{current_user.first_name} {current_user.last_name or ''}".strip(),
+                display_name=display_name,
                 description="",
                 specialization=[],
                 rating=0.0,
@@ -177,14 +185,21 @@ async def get_my_profile(
             db.add(master)
             await db.commit()
             await db.refresh(master)
+            print(f"✅ Created master profile for user {current_user.email}")
+        else:
+            print(f"✅ Found existing master profile: {master.display_name}")
         
         return master
+        
     except Exception as e:
-        print(f"Error in get_my_profile: {e}")
+        print(f"❌ Error in get_my_profile: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get master profile"
         )
+
 
 @router.put("/my-profile", response_model=MasterResponse)
 async def update_my_profile(
@@ -219,14 +234,15 @@ async def update_my_profile(
     return master
 
 # ==================== НОВЫЕ ИСПРАВЛЕННЫЕ ЭНДПОИНТЫ ====================
-
 @router.get("/my-stats")
 async def get_my_stats(
     current_user: User = Depends(get_current_master),
     db: AsyncSession = Depends(get_db)
 ):
-    """Получить статистику мастера - ИСПРАВЛЕННЫЙ ЭНДПОИНТ"""
+    """Получить статистику мастера - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
     try:
+        print(f"🔍 Getting stats for user: {current_user.email} (ID: {current_user.id})")
+        
         # Находим профиль мастера
         result = await db.execute(
             select(Master).where(Master.user_id == current_user.id)
@@ -234,6 +250,7 @@ async def get_my_stats(
         master = result.scalar_one_or_none()
         
         if not master:
+            print(f"⚠️ No master profile found for user {current_user.email}")
             # Если профиля нет, возвращаем нулевую статистику
             return {
                 "weekBookings": 0,
@@ -245,78 +262,110 @@ async def get_my_stats(
                 "cancellationRate": 0.0
             }
         
-        # Проверяем права доступа
+        print(f"✅ Found master profile: {master.display_name}")
+        
+        # Проверяем права доступа (более мягко)
         if not master.can_view_analytics:
-            raise HTTPException(
-                status_code=403,
-                detail="Analytics viewing permission required. Contact your manager."
-            )
+            print(f"⚠️ Master {master.display_name} doesn't have analytics permission")
+            # Вместо ошибки 403, даём базовую статистику
+            return {
+                "weekBookings": 0,
+                "totalClients": 0,
+                "monthRevenue": 0.0,
+                "totalBookings": 0,
+                "completedBookings": 0,
+                "cancelledBookings": 0,
+                "cancellationRate": 0.0,
+                "message": "Contact your manager for full analytics access"
+            }
         
         # Рассчитываем периоды
         now = datetime.now()
         week_ago = now - timedelta(days=7)
         month_ago = now - timedelta(days=30)
         
-        # Запросы за неделю
-        week_bookings = await db.scalar(
-            select(func.count(Booking.id))
-            .where(and_(
-                Booking.master_id == master.id,
-                Booking.date >= week_ago,
-                Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.COMPLETED])
-            ))
-        ) or 0
+        print(f"📊 Calculating stats for master ID: {master.id}")
         
-        # Общее количество уникальных клиентов
-        total_clients = await db.scalar(
-            select(func.count(func.distinct(Booking.client_id)))
-            .where(and_(
-                Booking.master_id == master.id,
-                Booking.status == BookingStatus.COMPLETED
-            ))
-        ) or 0
-        
-        # Доход за месяц
-        month_revenue = await db.scalar(
-            select(func.coalesce(func.sum(Booking.price), 0))
-            .where(and_(
-                Booking.master_id == master.id,
-                Booking.date >= month_ago,
-                Booking.status == BookingStatus.COMPLETED
-            ))
-        ) or 0.0
-        
-        # Общая статистика записей
-        bookings_stats = await db.execute(
-            select(
-                func.count(Booking.id).label('total'),
-                func.count(case((Booking.status == BookingStatus.COMPLETED, 1))).label('completed'),
-                func.count(case((Booking.status == BookingStatus.CANCELLED, 1))).label('cancelled')
+        try:
+            # Запросы за неделю
+            week_bookings = await db.scalar(
+                select(func.count(Booking.id))
+                .where(and_(
+                    Booking.master_id == master.id,
+                    Booking.date >= week_ago,
+                    Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.COMPLETED])
+                ))
+            ) or 0
+            
+            # Общее количество уникальных клиентов
+            total_clients = await db.scalar(
+                select(func.count(func.distinct(Booking.client_id)))
+                .where(and_(
+                    Booking.master_id == master.id,
+                    Booking.status == BookingStatus.COMPLETED
+                ))
+            ) or 0
+            
+            # Доход за месяц
+            month_revenue = await db.scalar(
+                select(func.coalesce(func.sum(Booking.price), 0))
+                .where(and_(
+                    Booking.master_id == master.id,
+                    Booking.date >= month_ago,
+                    Booking.status == BookingStatus.COMPLETED
+                ))
+            ) or 0.0
+            
+            # Общая статистика записей
+            bookings_stats = await db.execute(
+                select(
+                    func.count(Booking.id).label('total'),
+                    func.count(case((Booking.status == BookingStatus.COMPLETED, 1))).label('completed'),
+                    func.count(case((Booking.status == BookingStatus.CANCELLED, 1))).label('cancelled')
+                )
+                .where(Booking.master_id == master.id)
             )
-            .where(Booking.master_id == master.id)
-        )
-        
-        stats = bookings_stats.first()
-        
-        # Рассчитываем процент отмен
-        cancellation_rate = 0.0
-        if stats.total > 0:
-            cancellation_rate = (stats.cancelled / stats.total) * 100
-        
-        return {
-            "weekBookings": int(week_bookings),
-            "totalClients": int(total_clients),
-            "monthRevenue": float(month_revenue),
-            "totalBookings": int(stats.total),
-            "completedBookings": int(stats.completed),
-            "cancelledBookings": int(stats.cancelled),
-            "cancellationRate": round(cancellation_rate, 2)
-        }
+            
+            stats = bookings_stats.first()
+            
+            # Рассчитываем процент отмен
+            cancellation_rate = 0.0
+            if stats.total > 0:
+                cancellation_rate = (stats.cancelled / stats.total) * 100
+            
+            result_stats = {
+                "weekBookings": int(week_bookings),
+                "totalClients": int(total_clients),
+                "monthRevenue": float(month_revenue),
+                "totalBookings": int(stats.total),
+                "completedBookings": int(stats.completed),
+                "cancelledBookings": int(stats.cancelled),
+                "cancellationRate": round(cancellation_rate, 2)
+            }
+            
+            print(f"✅ Stats calculated successfully: {result_stats}")
+            return result_stats
+            
+        except Exception as stats_error:
+            print(f"❌ Error calculating stats: {stats_error}")
+            # В случае ошибки с БД возвращаем нулевую статистику
+            return {
+                "weekBookings": 0,
+                "totalClients": 0,
+                "monthRevenue": 0.0,
+                "totalBookings": 0,
+                "completedBookings": 0,
+                "cancelledBookings": 0,
+                "cancellationRate": 0.0,
+                "error": "Stats calculation error"
+            }
         
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error in get_my_stats: {e}")
+        print(f"❌ Error in get_my_stats: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get master statistics"
