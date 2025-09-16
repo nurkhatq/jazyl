@@ -9,7 +9,7 @@ from app.schemas.user import UserCreate
 from app.services.auth import AuthService
 import secrets
 import string
-
+from app.api.services import get_current_user_optional
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.models.master import Master, MasterSchedule
@@ -40,29 +40,69 @@ async def get_tenant_id_from_header(request: Request) -> Optional[UUID]:
 @router.get("/", response_model=List[MasterResponse], include_in_schema=False)
 async def get_masters(
     request: Request,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    # Опциональная авторизация для административного доступа
+    current_user: Optional[User] = Depends(get_current_user_optional)
 ):
-    """Получить список мастеров для публичного доступа"""
+    """Получить список мастеров (публичный доступ или административный)"""
     try:
-        tenant_id = await get_current_tenant(request, db)
+        tenant_id = None
+        
+        # Если пользователь авторизован (административный доступ)
+        if current_user:
+            tenant_id = current_user.tenant_id
+            
+            # Если это админ/владелец, показываем всех мастеров включая неактивных
+            if current_user.role in [UserRole.OWNER, UserRole.ADMIN]:
+                result = await db.execute(
+                    select(Master).where(Master.tenant_id == tenant_id)
+                    .order_by(Master.display_name)
+                )
+                masters = result.scalars().all()
+                return masters
+        
+        # Публичный доступ или обычные пользователи
+        if not tenant_id:
+            tenant_id = await get_current_tenant(request, db)
+        
+        result = await db.execute(
+            select(Master).where(
+                and_(
+                    Master.tenant_id == tenant_id,
+                    Master.is_active == True,
+                    Master.is_visible == True
+                )
+            )
+            .order_by(Master.display_name)
+        )
+        masters = result.scalars().all()
+        
+        return masters
+        
     except HTTPException:
+        # Если не удалось определить тенант
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tenant not specified"
         )
+
+# Добавляем вспомогательную функцию для опциональной авторизации
+async def get_current_user_optional(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+) -> Optional[User]:
+    """Возвращает пользователя если он авторизован, иначе None"""
+    auth_header = request.headers.get("authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None
     
-    result = await db.execute(
-        select(Master).where(
-            and_(
-                Master.tenant_id == tenant_id,
-                Master.is_active == True,
-                Master.is_visible == True
-            )
-        )
-    )
-    masters = result.scalars().all()
-    
-    return masters
+    token = auth_header.split(" ")[1]
+    try:
+        from app.utils.security import get_current_user_from_token
+        user = await get_current_user_from_token(token, db)
+        return user
+    except:
+        return None
 
 @router.get("/{master_id}", response_model=MasterResponse)
 async def get_master(
@@ -419,7 +459,127 @@ async def get_my_bookings(
             detail="Failed to get bookings"
         )
 
-# ---------------------- Permission Requests ----------------------
+@router.post("/upload-photo")
+async def upload_photo(
+    photo: UploadFile = File(...),
+    current_user: User = Depends(get_current_master),
+    db: AsyncSession = Depends(get_db)
+):
+    """Загрузить фото мастера"""
+    try:
+        result = await db.execute(
+            select(Master).where(Master.user_id == current_user.id)
+        )
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            raise HTTPException(status_code=404, detail="Master profile not found")
+        
+        if not master.can_upload_photos:
+            raise HTTPException(
+                status_code=403,
+                detail="Photo upload permission required. Contact your manager."
+            )
+        
+        # Проверяем тип файла
+        if not photo.content_type or not photo.content_type.startswith('image/'):
+            raise HTTPException(
+                status_code=400,
+                detail="Only image files are allowed"
+            )
+        
+        # Загружаем файл
+        upload_service = FileUploadService()
+        photo_url = await upload_service.upload_master_photo(photo, master.id)
+        
+        # Обновляем профиль
+        master.photo_url = photo_url
+        master.updated_at = datetime.utcnow()
+        await db.commit()
+        
+        return {"photo_url": photo_url, "message": "Photo uploaded successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error uploading photo: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to upload photo"
+        )
+
+@router.get("/my-analytics")
+async def get_my_analytics(
+    current_user: User = Depends(get_current_master),
+    db: AsyncSession = Depends(get_db)
+):
+    """Получить свою аналитику"""
+    try:
+        result = await db.execute(
+            select(Master).where(Master.user_id == current_user.id)
+        )
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            return {
+                "revenue_trend": [],
+                "popular_services": [],
+                "client_retention": 0,
+                "average_rating": 0
+            }
+        
+        if not master.can_view_analytics:
+            raise HTTPException(
+                status_code=403,
+                detail="Analytics viewing permission required. Contact your manager."
+            )
+        
+        # Базовая аналитика (можно расширить)
+        from datetime import timedelta
+        
+        now = datetime.now()
+        month_ago = now - timedelta(days=30)
+        
+        # Доходы за последние 30 дней
+        revenue_result = await db.execute(
+            select(
+                func.sum(Booking.price).label('revenue'),
+                func.date(Booking.date).label('booking_date')
+            )
+            .where(and_(
+                Booking.master_id == master.id,
+                Booking.status == BookingStatus.COMPLETED,
+                Booking.date >= month_ago
+            ))
+            .group_by(func.date(Booking.date))
+            .order_by(func.date(Booking.date))
+        )
+        
+        revenue_trend = [
+            {
+                "date": row.booking_date.isoformat(),
+                "revenue": float(row.revenue or 0)
+            }
+            for row in revenue_result.fetchall()
+        ]
+        
+        return {
+            "revenue_trend": revenue_trend,
+            "popular_services": [],  # TODO: Реализовать
+            "client_retention": 0,   # TODO: Реализовать
+            "average_rating": float(master.rating)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error getting analytics: {e}")
+        return {
+            "revenue_trend": [],
+            "popular_services": [],
+            "client_retention": 0,
+            "average_rating": 0
+        }
 @router.post("/request-permission")
 async def request_permission(
     permission_data: dict,
@@ -604,6 +764,76 @@ async def create_master(
     master = await service.create_master(tenant_id, master_data.dict())
     
     return master
+
+@router.put("/{master_id}", response_model=MasterResponse)
+async def update_master(
+    master_id: UUID,
+    master_data: MasterUpdate,
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_db)
+):
+    """Обновить мастера (только для владельцев/админов)"""
+    # Проверяем что мастер существует и принадлежит тому же тенанту
+    result = await db.execute(
+        select(Master).where(
+            and_(
+                Master.id == master_id,
+                Master.tenant_id == current_user.tenant_id
+            )
+        )
+    )
+    master = result.scalar_one_or_none()
+    
+    if not master:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Master not found"
+        )
+    
+    # Обновляем только переданные поля
+    update_data = master_data.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        if hasattr(master, key):
+            setattr(master, key, value)
+    
+    master.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(master)
+    
+    return master
+
+@router.delete("/{master_id}")
+async def delete_master(
+    master_id: UUID,
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_db)
+):
+    """Удалить мастера (только для владельцев/админов)"""
+    # Проверяем что мастер существует и принадлежит тому же тенанту
+    result = await db.execute(
+        select(Master).where(
+            and_(
+                Master.id == master_id,
+                Master.tenant_id == current_user.tenant_id
+            )
+        )
+    )
+    master = result.scalar_one_or_none()
+    
+    if not master:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Master not found"
+        )
+    
+    # Мягкое удаление - просто деактивируем
+    master.is_active = False
+    master.is_visible = False
+    master.updated_at = datetime.utcnow()
+    
+    await db.commit()
+    
+    return {"message": "Master deleted successfully"}
 
 @router.get("/permission-requests")
 async def get_permission_requests(

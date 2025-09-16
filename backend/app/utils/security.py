@@ -5,12 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Optional, List, Union
 from uuid import UUID
-
+from app.models.master import Master
 from app.config import settings
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.models.tenant import Tenant
-from app.models.master import Master
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
@@ -213,7 +212,7 @@ async def verify_master_belongs_to_tenant(
     if master_user.tenant_id != tenant_id:
         return False
     
-    # Дополнительная проверка через профиль мастера
+    
     result = await db.execute(
         select(Master).where(
             Master.user_id == master_user.id,

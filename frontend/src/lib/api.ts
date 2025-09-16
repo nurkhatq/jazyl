@@ -1,81 +1,53 @@
-import axios from 'axios'
+import axios, { AxiosError } from 'axios'
 import Cookies from 'js-cookie'
 
-// Определяем базовый URL API
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.jazyl.tech'
 
-// Создаем экземпляр axios с базовой конфигурацией
 const api = axios.create({
   baseURL: API_URL,
-  timeout: 30000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  timeout: 10000,
 })
 
-// Утилита для получения tenant info из URL
-const getTenantInfo = () => {
-  if (typeof window === 'undefined') return { subdomain: null, isAdmin: false }
-  
-  const hostname = window.location.hostname
-  
-  if (hostname.includes('.jazyl.tech')) {
-    const parts = hostname.split('.jazyl.tech')[0]
-    const isAdmin = parts.startsWith('admin.')
-    let subdomain = isAdmin ? parts.substring(6) : parts // убираем 'admin.' если есть
-    
-    // Убираем www если есть
-    if (subdomain === 'www') subdomain = ''
-    
-    return { subdomain, isAdmin }
-  }
-  
-  return { subdomain: null, isAdmin: false }
-}
-
-// ИСПРАВЛЕННЫЙ interceptor для requests - объединяем ваш подход с cookie и мой с admin detection
-api.interceptors.request.use((config) => {
-  if (typeof window !== 'undefined') {
-    const { subdomain, isAdmin } = getTenantInfo()
-    
-    // Добавляем subdomain если он есть и не системный
-    if (subdomain && subdomain !== 'jazyl') {
-      config.headers['X-Tenant-Subdomain'] = subdomain
-    }
-    
-    // Добавляем токен из cookie (ваш хороший подход!)
+// Добавляем токен в каждый запрос
+api.interceptors.request.use(
+  (config) => {
     const token = Cookies.get('access-token')
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
     
-    // Также проверяем localStorage как fallback
-    const authData = localStorage.getItem('auth-storage')
-    if (authData && !token) {
-      try {
-        const { state } = JSON.parse(authData)
-        if (state.accessToken) {
-          config.headers.Authorization = `Bearer ${state.accessToken}`
+    // Автоматически добавляем X-Tenant-Subdomain если мы на поддомене
+    if (typeof window !== 'undefined') {
+      const hostname = window.location.hostname
+      
+      if (hostname.includes('.jazyl.tech') && !hostname.startsWith('www.') && !hostname.startsWith('api.')) {
+        let subdomain = hostname.split('.jazyl.tech')[0]
+        
+        // Убираем admin. если есть
+        if (subdomain.startsWith('admin.')) {
+          subdomain = subdomain.replace('admin.', '')
         }
-      } catch (e) {
-        // Ignore JSON parse errors
+        
+        if (subdomain && subdomain !== 'jazyl') {
+          config.headers['X-Tenant-Subdomain'] = subdomain
+        }
       }
     }
+    
+    return config
+  },
+  (error) => {
+    return Promise.reject(error)
   }
-  
-  return config
-})
+)
 
-// ИСПРАВЛЕННЫЙ interceptor для responses - объединяем оба подхода
+// Обработка ответов и ошибок
 api.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    if (error.response?.status === 401 && typeof window !== 'undefined') {
-      const currentPath = window.location.pathname
-      
-      // Не перенаправляем если уже на странице логина
-      if (currentPath !== '/login') {
-        // Очищаем все данные аутентификации (ваш подход лучше!)
+  (error: AxiosError) => {
+    if (error.response?.status === 401) {
+      // Токен недействителен или истек
+      if (typeof window !== 'undefined') {
         Cookies.remove('access-token')
         Cookies.remove('auth-user')
         localStorage.removeItem('auth-storage')
@@ -137,7 +109,7 @@ export const updateTenant = async (tenantId: string, tenantData: any) => {
   return response.data
 }
 
-// ====================== MASTERS API ======================
+// ====================== MASTERS API (ADMIN FUNCTIONS) ======================
 export const getMasters = async (tenantId?: string) => {
   try {
     const config: any = {}
@@ -154,10 +126,7 @@ export const getMasters = async (tenantId?: string) => {
   }
 }
 
-/**
- * Получить мастера по ID
- */
-export const getMasterById = async (masterId: string, tenantId?: string) => {
+export const getMaster = async (masterId: string, tenantId?: string) => {
   try {
     const config: any = {}
     
@@ -173,9 +142,6 @@ export const getMasterById = async (masterId: string, tenantId?: string) => {
   }
 }
 
-/**
- * Создать нового мастера
- */
 export const createMaster = async (masterData: any, tenantId?: string) => {
   try {
     const config: any = {}
@@ -192,70 +158,30 @@ export const createMaster = async (masterData: any, tenantId?: string) => {
   }
 }
 
-/**
- * Обновить права мастера (только для владельцев)
- */
-export const updateMasterPermissions = async (masterId: string, permissions: {
-  can_edit_profile?: boolean;
-  can_edit_schedule?: boolean;
-  can_edit_services?: boolean;
-  can_manage_bookings?: boolean;
-  can_view_analytics?: boolean;
-  can_upload_photos?: boolean;
-}) => {
+// ✅ ИСПРАВЛЕНО: Добавлена недостающая функция updateMaster
+export const updateMaster = async (masterId: string, masterData: any) => {
   try {
-    const response = await api.put(`/api/masters/${masterId}/permissions`, permissions)
+    const response = await api.put(`/api/masters/${masterId}`, masterData)
     return response.data
   } catch (error) {
-    console.error('Error updating master permissions:', error)
+    console.error('Error updating master:', error)
     throw error
   }
 }
 
-/**
- * Получить запросы разрешений (для администраторов)
- */
-export const getPermissionRequests = async () => {
+// ✅ ИСПРАВЛЕНО: Добавлена недостающая функция deleteMaster
+export const deleteMaster = async (masterId: string) => {
   try {
-    const response = await api.get('/api/masters/permission-requests')
+    const response = await api.delete(`/api/masters/${masterId}`)
     return response.data
   } catch (error) {
-    console.error('Error getting permission requests:', error)
-    return []
-  }
-}
-
-/**
- * Одобрить запрос разрешения
- */
-export const approvePermissionRequest = async (requestId: string, reviewNote?: string) => {
-  try {
-    const response = await api.put(`/api/masters/permission-requests/${requestId}/approve`, {
-      review_note: reviewNote || ''
-    })
-    return response.data
-  } catch (error) {
-    console.error('Error approving permission request:', error)
-    throw error
-  }
-}
-
-/**
- * Отклонить запрос разрешения
- */
-export const rejectPermissionRequest = async (requestId: string, reviewNote?: string) => {
-  try {
-    const response = await api.put(`/api/masters/permission-requests/${requestId}/reject`, {
-      review_note: reviewNote || ''
-    })
-    return response.data
-  } catch (error) {
-    console.error('Error rejecting permission request:', error)
+    console.error('Error deleting master:', error)
     throw error
   }
 }
 
 // ====================== MASTER PROFILE API (для мастеров) ======================
+
 /**
  * Получить свой профиль мастера
  */
@@ -368,6 +294,19 @@ export const uploadMasterPhoto = async (photo: File) => {
 }
 
 /**
+ * Получить аналитику мастера
+ */
+export const getMyAnalytics = async () => {
+  try {
+    const response = await api.get('/api/masters/my-analytics')
+    return response.data
+  } catch (error) {
+    console.error('Error getting master analytics:', error)
+    return {}
+  }
+}
+
+/**
  * Запросить разрешение у менеджера
  */
 export const requestPermission = async (permissionData: {
@@ -424,6 +363,71 @@ export const blockMyTime = async (blockData: {
     return response.data
   } catch (error) {
     console.error('Error blocking time:', error)
+    throw error
+  }
+}
+
+// ====================== ADMIN API для управления мастерами ======================
+
+/**
+ * Обновить права мастера (только для владельцев)
+ */
+export const updateMasterPermissions = async (masterId: string, permissions: {
+  can_edit_profile?: boolean;
+  can_edit_schedule?: boolean;
+  can_edit_services?: boolean;
+  can_manage_bookings?: boolean;
+  can_view_analytics?: boolean;
+  can_upload_photos?: boolean;
+}) => {
+  try {
+    const response = await api.put(`/api/masters/${masterId}/permissions`, permissions)
+    return response.data
+  } catch (error) {
+    console.error('Error updating master permissions:', error)
+    throw error
+  }
+}
+
+/**
+ * Получить запросы разрешений (для администраторов)
+ */
+export const getPermissionRequests = async () => {
+  try {
+    const response = await api.get('/api/masters/permission-requests')
+    return response.data
+  } catch (error) {
+    console.error('Error getting permission requests:', error)
+    return []
+  }
+}
+
+/**
+ * Одобрить запрос разрешения
+ */
+export const approvePermissionRequest = async (requestId: string, reviewNote?: string) => {
+  try {
+    const response = await api.put(`/api/masters/permission-requests/${requestId}/approve`, {
+      review_note: reviewNote || ''
+    })
+    return response.data
+  } catch (error) {
+    console.error('Error approving permission request:', error)
+    throw error
+  }
+}
+
+/**
+ * Отклонить запрос разрешения
+ */
+export const rejectPermissionRequest = async (requestId: string, reviewNote?: string) => {
+  try {
+    const response = await api.put(`/api/masters/permission-requests/${requestId}/reject`, {
+      review_note: reviewNote || ''
+    })
+    return response.data
+  } catch (error) {
+    console.error('Error rejecting permission request:', error)
     throw error
   }
 }
@@ -518,6 +522,75 @@ export const getAvailableSlots = async (
   const response = await api.get('/api/bookings/availability/slots', config)
   return response.data
 }
+
+export const createBooking = async (bookingData: any, tenantId?: string) => {
+  const config: any = {}
+  
+  if (tenantId) {
+    config.headers = { 'X-Tenant-ID': tenantId }
+  }
+  
+  const response = await api.post('/api/bookings', bookingData, config)
+  return response.data
+}
+
+export const getBookings = async (filters?: any) => {
+  const response = await api.get('/api/bookings', { params: filters })
+  return response.data
+}
+
+export const confirmBooking = async (bookingId: string, token: string) => {
+  const response = await api.post(`/api/bookings/${bookingId}/confirm`, null, {
+    params: { token }
+  })
+  return response.data
+}
+
+export const cancelBooking = async (bookingId: string, token: string) => {
+  const response = await api.post(`/api/bookings/${bookingId}/cancel`, null, {
+    params: { token }
+  })
+  return response.data
+}
+
+// ====================== DASHBOARD API ======================
+export const getDashboardStats = async (dateFrom?: string, dateTo?: string, tenantId?: string) => {
+  const config: any = {
+    params: { date_from: dateFrom, date_to: dateTo }
+  }
+  
+  if (tenantId) {
+    config.headers = { 'X-Tenant-ID': tenantId }
+  }
+  
+  const response = await api.get('/api/dashboard/stats', config)
+  return response.data
+}
+
+export const getTodayOverview = async (tenantId?: string) => {
+  const config: any = {}
+  
+  if (tenantId) {
+    config.headers = { 'X-Tenant-ID': tenantId }
+  }
+  
+  const response = await api.get('/api/dashboard/today', config)
+  return response.data
+}
+
+export const getRevenueReport = async (period: string, tenantId?: string) => {
+  const config: any = {
+    params: { period }
+  }
+  
+  if (tenantId) {
+    config.headers = { 'X-Tenant-ID': tenantId }
+  }
+  
+  const response = await api.get('/api/dashboard/revenue', config)
+  return response.data
+}
+
 // ====================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ======================
 
 /**
@@ -591,73 +664,6 @@ export const checkMissingPermissions = (masterProfile: any): string[] => {
   }
   
   return missing
-}
-export const createBooking = async (bookingData: any, tenantId?: string) => {
-  const config: any = {}
-  
-  if (tenantId) {
-    config.headers = { 'X-Tenant-ID': tenantId }
-  }
-  
-  const response = await api.post('/api/bookings', bookingData, config)
-  return response.data
-}
-
-export const getBookings = async (filters?: any) => {
-  const response = await api.get('/api/bookings', { params: filters })
-  return response.data
-}
-
-export const confirmBooking = async (bookingId: string, token: string) => {
-  const response = await api.post(`/api/bookings/${bookingId}/confirm`, null, {
-    params: { token }
-  })
-  return response.data
-}
-
-export const cancelBooking = async (bookingId: string, token: string) => {
-  const response = await api.post(`/api/bookings/${bookingId}/cancel`, null, {
-    params: { token }
-  })
-  return response.data
-}
-
-// ====================== DASHBOARD API ======================
-export const getDashboardStats = async (dateFrom?: string, dateTo?: string, tenantId?: string) => {
-  const config: any = {
-    params: { date_from: dateFrom, date_to: dateTo }
-  }
-  
-  if (tenantId) {
-    config.headers = { 'X-Tenant-ID': tenantId }
-  }
-  
-  const response = await api.get('/api/dashboard/stats', config)
-  return response.data
-}
-
-export const getTodayOverview = async (tenantId?: string) => {
-  const config: any = {}
-  
-  if (tenantId) {
-    config.headers = { 'X-Tenant-ID': tenantId }
-  }
-  
-  const response = await api.get('/api/dashboard/today', config)
-  return response.data
-}
-
-export const getRevenueReport = async (period: string, tenantId?: string) => {
-  const config: any = {
-    params: { period }
-  }
-  
-  if (tenantId) {
-    config.headers = { 'X-Tenant-ID': tenantId }
-  }
-  
-  const response = await api.get('/api/dashboard/revenue', config)
-  return response.data
 }
 
 export default api
