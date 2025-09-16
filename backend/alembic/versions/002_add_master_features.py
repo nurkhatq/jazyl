@@ -1,89 +1,66 @@
-"""Add master permissions and related tables
+"""Add master permissions
 
-Revision ID: 002_add_master_features
-Revises: 001_add_master_permissions
-Create Date: 2025-09-10 13:00:00.000000
+Revision ID: 002
+Revises: 001
+Create Date: 2025-09-16 12:00:00.000000
 
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 # revision identifiers
-revision = '003'
-down_revision = '002'
+revision = '002'
+down_revision = '001'
 branch_labels = None
 depends_on = None
 
 def upgrade() -> None:
-    # Создаем enum для статусов запросов разрешений
-    permission_status_enum = postgresql.ENUM(
-        'pending', 'approved', 'rejected',
-        name='permissionrequeststatus'
-    )
-    permission_status_enum.create(op.get_bind())
+    # Проверяем существование столбцов перед добавлением
+    connection = op.get_bind()
+    inspector = sa.inspect(connection)
+    columns = [col['name'] for col in inspector.get_columns('masters')]
     
-    # Создаем enum для типов разрешений
-    permission_type_enum = postgresql.ENUM(
-        'edit_schedule', 'edit_services', 'edit_profile', 
-        'upload_photos', 'manage_bookings', 'view_analytics',
-        name='permissionrequesttype'
-    )
-    permission_type_enum.create(op.get_bind())
+    # Добавляем поля прав доступа в таблицу masters если их нет
+    if 'can_edit_profile' not in columns:
+        op.add_column('masters', sa.Column('can_edit_profile', sa.Boolean(), nullable=False, server_default='true'))
     
-    # Создаем таблицу запросов разрешений
-    op.create_table(
-        'permission_requests',
-        sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False, default=sa.text('gen_random_uuid()')),
-        sa.Column('master_id', postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column('tenant_id', postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column('permission_type', permission_type_enum, nullable=False),
-        sa.Column('reason', sa.Text(), nullable=False),
-        sa.Column('additional_info', sa.Text(), nullable=True),
-        sa.Column('status', permission_status_enum, nullable=False, default='pending'),
-        sa.Column('reviewed_by', postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column('review_note', sa.Text(), nullable=True),
-        sa.Column('reviewed_at', sa.DateTime(), nullable=True),
-        sa.Column('created_at', sa.DateTime(), nullable=False, default=sa.func.now()),
-        sa.Column('updated_at', sa.DateTime(), nullable=False, default=sa.func.now()),
-        sa.ForeignKeyConstraint(['master_id'], ['masters.id'], ),
-        sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ),
-        sa.ForeignKeyConstraint(['reviewed_by'], ['users.id'], ),
-        sa.PrimaryKeyConstraint('id')
-    )
+    if 'can_edit_schedule' not in columns:
+        op.add_column('masters', sa.Column('can_edit_schedule', sa.Boolean(), nullable=False, server_default='false'))
     
-    # Создаем таблицу блокировки времени
-    op.create_table(
-        'block_times',
-        sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False, default=sa.text('gen_random_uuid()')),
-        sa.Column('master_id', postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column('start_time', sa.DateTime(), nullable=False),
-        sa.Column('end_time', sa.DateTime(), nullable=False),
-        sa.Column('reason', sa.String(), nullable=False),
-        sa.Column('description', sa.Text(), nullable=True),
-        sa.Column('created_at', sa.DateTime(), nullable=False, default=sa.func.now()),
-        sa.Column('updated_at', sa.DateTime(), nullable=False, default=sa.func.now()),
-        sa.ForeignKeyConstraint(['master_id'], ['masters.id'], ),
-        sa.PrimaryKeyConstraint('id')
-    )
+    if 'can_edit_services' not in columns:
+        op.add_column('masters', sa.Column('can_edit_services', sa.Boolean(), nullable=False, server_default='false'))
     
-    # Создаем индексы для производительности
-    op.create_index('idx_permission_requests_master_id', 'permission_requests', ['master_id'])
-    op.create_index('idx_permission_requests_status', 'permission_requests', ['status'])
-    op.create_index('idx_block_times_master_id', 'block_times', ['master_id'])
-    op.create_index('idx_block_times_time_range', 'block_times', ['start_time', 'end_time'])
+    if 'can_manage_bookings' not in columns:
+        op.add_column('masters', sa.Column('can_manage_bookings', sa.Boolean(), nullable=False, server_default='true'))
+    
+    if 'can_view_analytics' not in columns:
+        op.add_column('masters', sa.Column('can_view_analytics', sa.Boolean(), nullable=False, server_default='true'))
+    
+    if 'can_upload_photos' not in columns:
+        op.add_column('masters', sa.Column('can_upload_photos', sa.Boolean(), nullable=False, server_default='true'))
+    
+    if 'experience_years' not in columns:
+        op.add_column('masters', sa.Column('experience_years', sa.Integer(), nullable=False, server_default='0'))
 
 def downgrade() -> None:
-    # Удаляем индексы
-    op.drop_index('idx_block_times_time_range', table_name='block_times')
-    op.drop_index('idx_block_times_master_id', table_name='block_times')
-    op.drop_index('idx_permission_requests_status', table_name='permission_requests')
-    op.drop_index('idx_permission_requests_master_id', table_name='permission_requests')
+    # Удаляем добавленные поля (только если они есть)
+    connection = op.get_bind()
+    inspector = sa.inspect(connection)
+    columns = [col['name'] for col in inspector.get_columns('masters')]
     
-    # Удаляем таблицы
-    op.drop_table('block_times')
-    op.drop_table('permission_requests')
+    columns_to_remove = [
+        'can_upload_photos',
+        'can_view_analytics', 
+        'can_manage_bookings',
+        'can_edit_services',
+        'can_edit_schedule',
+        'can_edit_profile',
+        'experience_years'
+    ]
     
-    # Удаляем enum типы
-    op.execute('DROP TYPE permissionrequesttype')
-    op.execute('DROP TYPE permissionrequeststatus')
+    for column in columns_to_remove:
+        if column in columns:
+            try:
+                op.drop_column('masters', column)
+            except:
+                pass
