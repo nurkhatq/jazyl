@@ -9,6 +9,21 @@ interface MastersListProps {
   tenantId: string
 }
 
+// ИСПРАВЛЕНИЕ: Функция для нормализации данных специализации
+const normalizeSpecialization = (spec: any): string[] => {
+  if (!spec) return [];
+  if (Array.isArray(spec)) return spec;
+  if (typeof spec === 'string') {
+    try {
+      const parsed = JSON.parse(spec);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 export function MastersList({ tenantId }: MastersListProps) {
   const { data: masters, isLoading } = useQuery({
     queryKey: ['masters', tenantId],
@@ -34,50 +49,55 @@ export function MastersList({ tenantId }: MastersListProps) {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      {masters?.map((master: any) => (
-        <Card key={master.id} className="hover:shadow-lg transition-shadow">
-          <CardHeader>
-            <CardTitle>{master.display_name}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {master.photo_url && (
-              <img
-                src={master.photo_url}
-                alt={master.display_name}
-                className="w-full h-48 object-cover rounded-md mb-4"
-              />
-            )}
-            <div className="space-y-2">
-              {master.specialization && master.specialization.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {master.specialization.map((spec: string) => (
-                    <span
-                      key={spec}
-                      className="px-2 py-1 bg-primary/10 text-primary rounded-md text-sm"
-                    >
-                      {spec}
+      {masters?.map((master: any) => {
+        // ИСПРАВЛЕНИЕ: Нормализуем specialization для каждого мастера
+        const normalizedSpecs = normalizeSpecialization(master.specialization);
+        
+        return (
+          <Card key={master.id} className="hover:shadow-lg transition-shadow">
+            <CardHeader>
+              <CardTitle>{master.display_name}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {master.photo_url && (
+                <img
+                  src={master.photo_url}
+                  alt={master.display_name}
+                  className="w-full h-48 object-cover rounded-md mb-4"
+                />
+              )}
+              <div className="space-y-2">
+                {normalizedSpecs.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {normalizedSpecs.map((spec: string) => (
+                      <span
+                        key={spec}
+                        className="px-2 py-1 bg-primary/10 text-primary rounded-md text-sm"
+                      >
+                        {spec}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {master.rating > 0 && (
+                  <div className="flex items-center gap-1">
+                    <span className="text-yellow-500">⭐</span>
+                    <span className="font-semibold">{master.rating.toFixed(1)}</span>
+                    <span className="text-muted-foreground text-sm">
+                      ({master.reviews_count} reviews)
                     </span>
-                  ))}
-                </div>
-              )}
-              {master.rating > 0 && (
-                <div className="flex items-center gap-1">
-                  <span className="text-yellow-500">⭐</span>
-                  <span className="font-semibold">{master.rating.toFixed(1)}</span>
-                  <span className="text-muted-foreground text-sm">
-                    ({master.reviews_count} reviews)
-                  </span>
-                </div>
-              )}
-              {master.description && (
-                <p className="text-sm text-muted-foreground line-clamp-3">
-                  {master.description}
-                </p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+                  </div>
+                )}
+                {master.description && (
+                  <p className="text-sm text-muted-foreground line-clamp-3">
+                    {master.description}
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )
+      })}
     </div>
   )
 }

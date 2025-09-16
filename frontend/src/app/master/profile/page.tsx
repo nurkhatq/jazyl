@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -26,6 +26,21 @@ import {
   Clock
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+
+// ИСПРАВЛЕНИЕ: Функция для нормализации данных специализации
+const normalizeSpecialization = (spec: any): string[] => {
+  if (!spec) return [];
+  if (Array.isArray(spec)) return spec;
+  if (typeof spec === 'string') {
+    try {
+      const parsed = JSON.parse(spec);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
 
 export default function MasterProfilePage() {
   const user = useAuthStore((state) => state.user)
@@ -65,14 +80,19 @@ export default function MasterProfilePage() {
     enabled: !!user?.id,
   })
 
-  // Инициализация формы
+  // ИСПРАВЛЕНИЕ: Нормализованные специализации
+  const normalizedSpecializations = useMemo(() => {
+    return normalizeSpecialization(masterInfo?.specialization);
+  }, [masterInfo?.specialization]);
+
+  // ИСПРАВЛЕНИЕ: Инициализация формы с правильной обработкой specialization
   useEffect(() => {
     if (masterInfo) {
       setProfileData({
         display_name: masterInfo.display_name || '',
         description: masterInfo.description || '',
         photo_url: masterInfo.photo_url || '',
-        specialization: masterInfo.specialization || [],
+        specialization: normalizeSpecialization(masterInfo.specialization),
         is_active: masterInfo.is_active ?? true,
         is_visible: masterInfo.is_visible ?? true,
         experience_years: masterInfo.experience_years || 0
@@ -218,49 +238,41 @@ export default function MasterProfilePage() {
             <div className="relative inline-block mb-4">
               <div className="w-24 h-24 bg-gray-200 rounded-full overflow-hidden mx-auto">
                 {profileData.photo_url ? (
-                  <img 
-                    src={profileData.photo_url} 
-                    alt="Profile" 
+                  <img
+                    src={profileData.photo_url}
+                    alt="Profile"
                     className="w-full h-full object-cover"
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-gray-400">
-                    <Camera className="h-8 w-8" />
+                    <Users className="h-8 w-8" />
                   </div>
                 )}
               </div>
               
-              {isEditing && masterInfo?.can_edit_profile && (
-                <>
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="absolute -bottom-1 -right-1 w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center shadow-lg"
-                    disabled={uploadPhotoMutation.isPending}
-                  >
-                    <Camera className="h-4 w-4" />
-                  </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handlePhotoUpload}
-                    className="hidden"
-                  />
-                </>
+              {isEditing && masterInfo?.can_upload_photos && (
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="absolute -bottom-1 -right-1 bg-blue-500 text-white rounded-full p-2 shadow-lg hover:bg-blue-600"
+                >
+                  <Camera className="h-4 w-4" />
+                </button>
               )}
+              
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handlePhotoUpload}
+                className="hidden"
+              />
             </div>
-            
-            <h2 className="text-xl font-bold mb-1">
-              {profileData.display_name || `${user?.first_name} ${user?.last_name}`}
+
+            <h2 className="text-xl font-semibold mb-2">
+              {profileData.display_name || 'Не указано'}
             </h2>
             
             <div className="flex items-center justify-center gap-2 mb-3">
-              <Star className="h-4 w-4 text-yellow-500" />
-              <span className="font-medium">{masterInfo?.rating?.toFixed(1) || '0.0'}</span>
-              <span className="text-sm text-gray-500">({masterInfo?.reviews_count || 0})</span>
-            </div>
-
-            <div className="flex items-center justify-center gap-2">
               <div className={`w-2 h-2 rounded-full ${profileData.is_active ? 'bg-green-500' : 'bg-gray-400'}`} />
               <span className="text-sm">{profileData.is_active ? 'Работаю' : 'Оффлайн'}</span>
             </div>
@@ -412,67 +424,16 @@ export default function MasterProfilePage() {
                 <div className="text-sm text-gray-600">Показывать клиентам</div>
               </div>
               <div className="flex items-center gap-2">
-                {profileData.is_visible ? (
-                  <Eye className="h-4 w-4 text-green-500" />
-                ) : (
-                  <EyeOff className="h-4 w-4 text-gray-400" />
-                )}
+                {profileData.is_visible ? <Eye className="h-4 w-4 text-green-500" /> : <EyeOff className="h-4 w-4 text-gray-400" />}
                 <Switch
                   checked={profileData.is_visible}
                   onCheckedChange={(checked) => setProfileData(prev => ({ ...prev, is_visible: checked }))}
-                  disabled={!isEditing || !masterInfo?.can_edit_profile}
+                  disabled={!isEditing}
                 />
               </div>
             </div>
           </CardContent>
         </Card>
-
-        {/* Contact Info */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Контактная информация</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex justify-between">
-              <span className="text-gray-600">Email:</span>
-              <span className="font-medium">{user?.email}</span>
-            </div>
-            {user?.phone && (
-              <div className="flex justify-between">
-                <span className="text-gray-600">Телефон:</span>
-                <span className="font-medium">{user.phone}</span>
-              </div>
-            )}
-            <div className="flex justify-between">
-              <span className="text-gray-600">Дата регистрации:</span>
-              <span className="font-medium">
-                {new Date(user?.created_at || '').toLocaleDateString()}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Permissions Notice */}
-        {!masterInfo?.can_edit_profile && (
-          <Card className="border-orange-200 bg-orange-50">
-            <CardContent className="p-4">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="h-5 w-5 text-orange-600 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium text-orange-800">
-                    Ограниченные права
-                  </p>
-                  <p className="text-xs text-orange-600 mt-1">
-                    Для редактирования профиля обратитесь к менеджеру
-                  </p>
-                  <Button size="sm" variant="outline" className="mt-2 h-7 text-xs">
-                    Запросить доступ
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
       </div>
     </div>
   )

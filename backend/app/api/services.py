@@ -42,17 +42,70 @@ async def get_current_user_optional(
         return None
 
 
-# --- CRUD Services ---
-@router.post("", response_model=ServiceResponse)
-@router.post("/", response_model=ServiceResponse)
+@router.post("")
+@router.post("/")
 async def create_service(
     service_data: ServiceCreate,
+    request: Request,
     current_user: User = Depends(require_role([UserRole.OWNER])),
     db: AsyncSession = Depends(get_db)
 ):
-    service = ServiceService(db)
-    new_service = await service.create_service(current_user.tenant_id, service_data)
-    return new_service
+    """Создать новый сервис - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
+    try:
+        # Получаем tenant_id из заголовка
+        tenant_id_str = request.headers.get("X-Tenant-ID")
+        if not tenant_id_str:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="X-Tenant-ID header is required"
+            )
+        
+        try:
+            tenant_id = UUID(tenant_id_str)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid tenant ID"
+            )
+        
+        # Проверяем что пользователь из того же тенанта
+        if current_user.tenant_id != tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+        
+        print(f"🔧 Creating service for tenant: {tenant_id}")
+        print(f"🔧 Service data: {service_data.dict()}")
+        
+        service = ServiceService(db)
+        created_service = await service.create_service(tenant_id, service_data)
+        
+        # Возвращаем простой dict вместо Pydantic схемы
+        return {
+            "id": str(created_service.id),
+            "tenant_id": str(created_service.tenant_id),
+            "name": created_service.name,
+            "description": created_service.description,
+            "price": created_service.price,
+            "duration": created_service.duration,
+            "category_id": str(created_service.category_id) if created_service.category_id else None,
+            "is_active": created_service.is_active if created_service.is_active is not None else True,
+            "is_popular": created_service.is_popular if created_service.is_popular is not None else False,
+            "created_at": created_service.created_at.isoformat() if created_service.created_at else None,
+            "updated_at": created_service.updated_at.isoformat() if created_service.updated_at else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error creating service: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create service"
+        )
 
 @router.get("", response_model=List[ServiceResponse])
 @router.get("/", response_model=List[ServiceResponse])

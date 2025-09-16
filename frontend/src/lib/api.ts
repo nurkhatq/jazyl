@@ -133,20 +133,25 @@ export const getMasters = async (tenantId?: string) => {
   try {
     const config: any = {}
     
-    // ✅ ИСПРАВЛЕНО: Правильная отправка X-Tenant-ID как строки
     if (tenantId) {
       const tenantIdString = typeof tenantId === 'string' ? tenantId : String(tenantId)
       config.headers = { 'X-Tenant-ID': tenantIdString }
-      console.log('🔧 [getMasters] Setting X-Tenant-ID:', tenantIdString)
     }
     
     const response = await api.get('/api/masters', config)
+    
+    // Нормализуем каждого мастера в ответе
+    if (Array.isArray(response.data)) {
+      return response.data.map(master => normalizeMasterData(master));
+    }
+    
     return response.data
   } catch (error) {
     console.error('Error getting masters:', error)
-    return []
+    throw error
   }
 }
+
 
 export const getMaster = async (masterId: string, tenantId?: string) => {
   try {
@@ -212,7 +217,8 @@ export const deleteMaster = async (masterId: string) => {
 export const getMyProfile = async () => {
   try {
     const response = await api.get('/api/masters/my-profile')
-    return response.data
+    // Нормализуем данные перед возвратом
+    return normalizeMasterData(response.data)
   } catch (error) {
     console.error('Error getting master profile:', error)
     throw error
@@ -497,6 +503,34 @@ export const createService = async (serviceData: any, tenantId?: string) => {
     throw error
   }
 }
+
+export const normalizeMasterData = (masterData: any) => {
+  if (!masterData) return null;
+  
+  return {
+    ...masterData,
+    // ИСПРАВЛЕНИЕ: Обрабатываем specialization правильно
+    specialization: Array.isArray(masterData.specialization) 
+      ? masterData.specialization 
+      : typeof masterData.specialization === 'string'
+        ? (() => {
+            try {
+              const parsed = JSON.parse(masterData.specialization);
+              return Array.isArray(parsed) ? parsed : [];
+            } catch {
+              return [];
+            }
+          })()
+        : [],
+    // Обрабатываем другие поля
+    experience_years: masterData.experience_years || 0,
+    rating: masterData.rating || 0.0,
+    reviews_count: masterData.reviews_count || 0,
+    is_active: masterData.is_active ?? true,
+    is_visible: masterData.is_visible ?? true
+  };
+};
+
 
 export const updateService = async (serviceId: string, serviceData: any) => {
   const response = await api.put(`/api/services/${serviceId}`, serviceData)
