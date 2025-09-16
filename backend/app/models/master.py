@@ -17,7 +17,7 @@ class Master(Base):
     display_name = Column(String, nullable=True)
     description = Column(Text, nullable=True)
     photo_url = Column(String, nullable=True)
-    specialization = Column(JSON, default=list)
+    _specialization = Column("specialization", JSON, default=list)  # Переименовываем колонку
     experience_years = Column(Integer, default=0)
     
     # Рейтинг и статистика
@@ -40,11 +40,37 @@ class Master(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    # ИСПРАВЛЕНИЕ: Property для правильной обработки specialization
+    @property
+    def specialization(self):
+        """Возвращает specialization как список строк"""
+        if self._specialization is None:
+            return []
+        if isinstance(self._specialization, list):
+            return self._specialization
+        if isinstance(self._specialization, str):
+            try:
+                import json
+                return json.loads(self._specialization)
+            except:
+                return []
+        return []
+    
+    @specialization.setter
+    def specialization(self, value):
+        """Устанавливает specialization"""
+        if value is None:
+            self._specialization = []
+        elif isinstance(value, list):
+            self._specialization = value
+        else:
+            self._specialization = []
+    
     # Связи - используйте строковые ссылки и lazy loading!
     permission_requests = relationship(
         "PermissionRequest", 
         back_populates="master", 
-        lazy="select",  # Изменено с selectin на select
+        lazy="select",
         cascade="all, delete-orphan"
     )
     block_times = relationship(
