@@ -90,16 +90,22 @@ export default function MasterDashboard() {
     return null
   }
 
-  const nextBooking = todayBookings?.find((booking: any) => {
-    const bookingTime = new Date(`${format(new Date(), 'yyyy-MM-dd')}T${booking.time}`)
+  const bookings = todayBookings?.bookings ?? []
+
+  const nextBooking = bookings.find((booking: any) => {
+    const bookingTime = new Date(booking.date)
     return bookingTime > currentTime
   })
 
-  const currentBooking = todayBookings?.find((booking: any) => {
-    const bookingTime = new Date(`${format(new Date(), 'yyyy-MM-dd')}T${booking.time}`)
-    const endTime = new Date(bookingTime.getTime() + (booking.duration || 30) * 60000)
-    return bookingTime <= currentTime && currentTime <= endTime
+  const currentBooking = bookings.find((booking: any) => {
+    const start = new Date(booking.date)
+    const end = new Date(booking.end_time)
+    return start <= currentTime && currentTime <= end
   })
+
+  const formatTime = (iso: string) => format(new Date(iso), 'HH:mm')
+  const getDurationMinutes = (startIso: string, endIso: string) =>
+    Math.max(0, Math.round((new Date(endIso).getTime() - new Date(startIso).getTime()) / 60000))
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -164,10 +170,12 @@ export default function MasterDashboard() {
                   <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
                   <span className="text-sm font-medium text-blue-800">Сейчас с клиентом</span>
                 </div>
-                <p className="font-medium">{currentBooking.client_name}</p>
-                <p className="text-sm text-gray-600">{currentBooking.service_name}</p>
+                <p className="font-medium">Запись</p>
+                <p className="text-sm text-gray-600">
+                  {formatTime(currentBooking.date)}–{formatTime(currentBooking.end_time)} ({getDurationMinutes(currentBooking.date, currentBooking.end_time)} мин)
+                </p>
                 <div className="flex items-center gap-4 mt-2 text-sm">
-                  <span>Время: {currentBooking.time}</span>
+                  <span>Время: {formatTime(currentBooking.date)}</span>
                   <span>Цена: ${currentBooking.price}</span>
                 </div>
               </div>
@@ -177,10 +185,12 @@ export default function MasterDashboard() {
                   <Clock className="h-4 w-4 text-green-600" />
                   <span className="text-sm font-medium text-green-800">Следующий клиент</span>
                 </div>
-                <p className="font-medium">{nextBooking.client_name}</p>
-                <p className="text-sm text-gray-600">{nextBooking.service_name}</p>
+                <p className="font-medium">Запись</p>
+                <p className="text-sm text-gray-600">
+                  {formatTime(nextBooking.date)}–{formatTime(nextBooking.end_time)} ({getDurationMinutes(nextBooking.date, nextBooking.end_time)} мин)
+                </p>
                 <div className="flex items-center gap-4 mt-2 text-sm">
-                  <span>Время: {nextBooking.time}</span>
+                  <span>Время: {formatTime(nextBooking.date)}</span>
                   <span>Цена: ${nextBooking.price}</span>
                 </div>
               </div>
@@ -197,7 +207,7 @@ export default function MasterDashboard() {
           <Card>
             <CardContent className="p-4 text-center">
               <div className="text-2xl font-bold text-blue-600">
-                {todayBookings?.length || 0}
+                {bookings.length}
               </div>
               <div className="text-sm text-gray-600">Записей сегодня</div>
             </CardContent>
@@ -206,8 +216,8 @@ export default function MasterDashboard() {
           <Card>
             <CardContent className="p-4 text-center">
               <div className="text-2xl font-bold text-green-600">
-                ${todayBookings?.reduce((sum: number, booking: any) => 
-                  booking.status !== 'cancelled' ? sum + (booking.price || 0) : sum, 0) || 0}
+                ${bookings.reduce((sum: number, booking: any) =>
+                  booking.status !== 'cancelled' ? sum + (booking.price || 0) : sum, 0)}
               </div>
               <div className="text-sm text-gray-600">Доход сегодня</div>
             </CardContent>
@@ -245,9 +255,9 @@ export default function MasterDashboard() {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            {todayBookings && todayBookings.length > 0 ? (
-              todayBookings.map((booking: any) => {
-                const bookingTime = new Date(`${format(new Date(), 'yyyy-MM-dd')}T${booking.time}`)
+            {bookings && bookings.length > 0 ? (
+              bookings.map((booking: any) => {
+                const bookingTime = new Date(booking.date)
                 const isPast = bookingTime < currentTime
                 const isCurrent = currentBooking?.id === booking.id
                 
@@ -265,7 +275,7 @@ export default function MasterDashboard() {
                         isCurrent ? 'text-blue-700' :
                         isPast ? 'text-gray-500' : 'text-gray-900'
                       }`}>
-                        {booking.time}
+                        {formatTime(booking.date)}
                       </div>
                       <div className={`w-2 h-2 rounded-full mx-auto mt-1 ${getStatusColor(booking.status)}`} />
                     </div>
@@ -274,20 +284,15 @@ export default function MasterDashboard() {
                       <p className={`font-medium truncate ${
                         isPast ? 'text-gray-600' : 'text-gray-900'
                       }`}>
-                        {booking.client_name}
+                        Запись
                       </p>
                       <p className="text-sm text-gray-500 truncate">
-                        {booking.service_name}
+                        {formatTime(booking.date)}–{formatTime(booking.end_time)} ({getDurationMinutes(booking.date, booking.end_time)} мин)
                       </p>
                     </div>
                     
                     <div className="flex-shrink-0 text-right">
                       <div className="text-sm font-medium">${booking.price}</div>
-                      {booking.client_phone && (
-                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 mt-1">
-                          <Phone className="h-3 w-3" />
-                        </Button>
-                      )}
                     </div>
                   </div>
                 )
