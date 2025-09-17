@@ -4,12 +4,15 @@ export function middleware(request: NextRequest) {
   const hostname = request.headers.get('host') || ''
   const pathname = request.nextUrl.pathname
   
+  console.log('🔍 MIDDLEWARE DEBUG:', { hostname, pathname })
+  
   // Получаем subdomain
   let subdomain = ''
   let isAdmin = false
   
   if (hostname.includes('.jazyl.tech')) {
     const hostParts = hostname.split('.jazyl.tech')[0]
+    console.log('🔍 HOST PARTS:', hostParts)
     
     // Специальная обработка для admin.jazyl.tech - это публичная страница барбершопа "admin"
     if (hostParts === 'admin') {
@@ -20,9 +23,14 @@ export function middleware(request: NextRequest) {
     }
   }
   
+  console.log('🔍 PARSED:', { subdomain, isAdmin })
+  
   // ИСПРАВЛЕНО: правильная обработка jazyl.tech
   // Если это основной домен jazyl.tech (БЕЗ admin префикса)
-  if ((!subdomain || subdomain === 'www' || subdomain === 'jazyl') && !isAdmin) {
+  const isMainDomain = (!subdomain || subdomain === 'www' || subdomain === 'jazyl') && !isAdmin
+  console.log('🔍 MAIN DOMAIN CHECK:', { isMainDomain, subdomain, isAdmin })
+  
+  if (isMainDomain) {
     console.log('🌐 MAIN DOMAIN:', hostname, 'pathname:', pathname)
     
     // Если пользователь заходит на jazyl.tech/dashboard - это админка основной платформы
@@ -61,8 +69,11 @@ export function middleware(request: NextRequest) {
   
   
   // Если это обычный поддомен (клиентская страница <barber-name>.jazyl.tech)
-  if (subdomain && !isAdmin) {
-    console.log('🌐 CLIENT ACCESS for subdomain:', subdomain)
+  const isClientSubdomain = subdomain && !isAdmin
+  console.log('🔍 CLIENT SUBDOMAIN CHECK:', { isClientSubdomain, subdomain, isAdmin })
+  
+  if (isClientSubdomain) {
+    console.log('🌐 CLIENT ACCESS for subdomain:', subdomain, 'pathname:', pathname)
     
     // Разрешенные публичные пути для клиентов
     const isPublicClientPath = pathname === '/' ||
