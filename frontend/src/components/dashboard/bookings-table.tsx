@@ -25,12 +25,11 @@ export function BookingsTable({ date }: BookingsTableProps) {
   const { data: bookings, isLoading, refetch } = useQuery({
     queryKey: ['bookings', date],
     queryFn: async () => {
-      const response = await api.get('/api/bookings', {
+      const response = await api.get('/api/bookings/', {
         params: {
           date_from: date ? format(date, 'yyyy-MM-dd') : undefined,
           date_to: date ? format(date, 'yyyy-MM-dd') : undefined,
-        },
-        headers: { 'X-Tenant-ID': user?.tenant_id }
+        }
       })
       return response.data
     },

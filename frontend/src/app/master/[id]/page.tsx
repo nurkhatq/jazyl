@@ -44,7 +44,14 @@ export default function MasterProfilePage({ params }: MasterProfileProps) {
 
   const loadData = async () => {
     try {
-      const subdomain = window.location.hostname.split('.')[0]
+      // Get subdomain from URL parameter or hostname
+      const urlParams = new URLSearchParams(window.location.search)
+      let subdomain = urlParams.get('subdomain')
+      
+      if (!subdomain) {
+        subdomain = window.location.hostname.split('.')[0]
+      }
+      
       if (subdomain === 'jazyl' || subdomain === 'www' || subdomain === 'localhost') {
         router.push('/platform')
         return

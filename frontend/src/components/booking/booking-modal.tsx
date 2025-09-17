@@ -209,7 +209,7 @@ export default function BookingModal({
       }
       
       const response = await api.post('/api/bookings', bookingData, {
-        headers: { 'X-Tenant-ID': tenant.id }
+        headers: { 'X-Tenant-Subdomain': tenant.subdomain }
       })
       
       toast({

@@ -118,7 +118,8 @@ export default function MastersShowcase({ masters, onSelectMaster }: MastersShow
                   variant="outline"
                   className="w-full"
                   onClick={() => {
-                    window.open(`/master/${master.id}`, '_blank')
+                    const subdomain = window.location.hostname.split('.')[0]
+                    window.open(`/master/${master.id}?subdomain=${subdomain}`, '_blank')
                   }}
                 >
                   View Profile
