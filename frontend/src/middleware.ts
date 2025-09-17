@@ -67,6 +67,11 @@ export function middleware(request: NextRequest) {
                               pathname.startsWith('/booking') ||
                               pathname.startsWith('/confirm') ||
                               pathname.startsWith('/cancel') ||
+                              pathname.startsWith('/login') ||
+                              pathname.startsWith('/register') ||
+                              pathname.startsWith('/forgot-password') ||
+                              pathname.startsWith('/verify-email') ||
+                              pathname.startsWith('/set-password') ||
                               pathname === '/404'
     
     if (isPublicClientPath) {

@@ -65,13 +65,18 @@ api.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
     if (error.response?.status === 401) {
-      // Токен недействителен или истек
-      if (typeof window !== 'undefined') {
-        Cookies.remove('access-token')
-        Cookies.remove('auth-user')
-        localStorage.removeItem('auth-storage')
-        
-        window.location.href = '/login'
+      // Проверяем, не является ли это публичным API для получения данных о tenant
+      const isPublicTenantAPI = error.config?.url?.includes('/api/tenants/subdomain/')
+      
+      if (!isPublicTenantAPI) {
+        // Токен недействителен или истек (только для защищенных API)
+        if (typeof window !== 'undefined') {
+          Cookies.remove('access-token')
+          Cookies.remove('auth-user')
+          localStorage.removeItem('auth-storage')
+          
+          window.location.href = '/login'
+        }
       }
     }
     return Promise.reject(error)
