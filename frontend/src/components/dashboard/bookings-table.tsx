@@ -70,8 +70,8 @@ export function BookingsTable({ date }: BookingsTableProps) {
           {bookings?.map((booking: any) => (
             <TableRow key={booking.id}>
               <TableCell>{format(new Date(booking.date), 'HH:mm')}</TableCell>
-              <TableCell>Client #{booking.client_id.slice(0, 8)}</TableCell>
-              <TableCell>Service #{booking.service_id.slice(0, 8)}</TableCell>
+              <TableCell>{booking.client_name || `Client #${booking.client_id.slice(0, 8)}`}</TableCell>
+              <TableCell>{booking.service_name || `Service #${booking.service_id.slice(0, 8)}`}</TableCell>
               <TableCell>Master #{booking.master_id.slice(0, 8)}</TableCell>
               <TableCell>
                 <Badge variant={booking.status === 'confirmed' ? 'default' : 'secondary'}>

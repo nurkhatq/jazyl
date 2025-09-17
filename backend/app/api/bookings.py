@@ -392,8 +392,7 @@ async def get_available_slots(
     return {"slots": slots}
 
 # --- Protected endpoints (требуют авторизации) ---
-@router.get("", response_model=List[BookingResponse])
-@router.get("/", response_model=List[BookingResponse])
+@router.get("/")
 async def get_bookings(
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
@@ -413,7 +412,33 @@ async def get_bookings(
         status=status
     )
     
-    return bookings
+    # Convert to response format with client and service names
+    result = []
+    for booking in bookings:
+        result.append({
+            "id": str(booking.id),
+            "tenant_id": str(booking.tenant_id),
+            "master_id": str(booking.master_id),
+            "service_id": str(booking.service_id),
+            "client_id": str(booking.client_id),
+            "client_name": f"{booking.client.first_name} {booking.client.last_name}".strip() or "Unknown Client",
+            "service_name": booking.service.name or "Unknown Service",
+            "date": booking.date.isoformat(),
+            "end_time": booking.end_time.isoformat(),
+            "status": booking.status.value,
+            "price": booking.price,
+            "notes": booking.notes,
+            "confirmation_token": booking.confirmation_token,
+            "cancellation_token": booking.cancellation_token,
+            "confirmed_at": booking.confirmed_at.isoformat() if booking.confirmed_at else None,
+            "cancelled_at": booking.cancelled_at.isoformat() if booking.cancelled_at else None,
+            "cancellation_reason": booking.cancellation_reason,
+            "created_at": booking.created_at.isoformat(),
+            "updated_at": booking.updated_at.isoformat(),
+            "duration": int((booking.end_time - booking.date).total_seconds() / 60)
+        })
+    
+    return result
 
 @router.get("/{booking_id}", response_model=BookingResponse)
 async def get_booking(

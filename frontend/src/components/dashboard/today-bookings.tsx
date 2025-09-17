@@ -69,9 +69,9 @@ export function TodayBookings() {
                 <div className="flex items-center space-x-4">
                   <div className="font-semibold">{booking.time}</div>
                   <div>
-                    <p className="text-sm font-medium">Client #{booking.client_id.slice(0, 8)}</p>
+                    <p className="text-sm font-medium">{booking.client_name || `Client #${booking.client_id.slice(0, 8)}`}</p>
                     <p className="text-xs text-muted-foreground">
-                      Service #{booking.service_id.slice(0, 8)}
+                      {booking.service_name || `Service #${booking.service_id.slice(0, 8)}`} • {booking.duration || 30}min
                     </p>
                   </div>
                 </div>

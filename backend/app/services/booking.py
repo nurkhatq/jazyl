@@ -97,7 +97,7 @@ class BookingService:
         master_id: Optional[UUID] = None,
         status: Optional[BookingStatus] = None
     ) -> List[Booking]:
-        query = select(Booking).where(Booking.tenant_id == tenant_id)
+        query = select(Booking).join(Client).join(Service).where(Booking.tenant_id == tenant_id)
         
         if date_from:
             query = query.where(Booking.date >= datetime.combine(date_from, datetime.min.time()))

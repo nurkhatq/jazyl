@@ -27,6 +27,7 @@ class Booking(Base):
     service_id = Column(UUID(as_uuid=True), ForeignKey("services.id"), nullable=False)
     
     date = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=False)
     price = Column(Float, nullable=False)
     
     status = Column(SqlEnum(BookingStatus), default=BookingStatus.PENDING)

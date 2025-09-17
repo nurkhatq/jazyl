@@ -89,7 +89,7 @@ class DashboardService:
         start_of_day = datetime.combine(today, datetime.min.time())
         end_of_day = datetime.combine(today, datetime.max.time())
         
-        query = select(Booking).where(
+        query = select(Booking).join(Client).join(Service).where(
             and_(
                 Booking.tenant_id == tenant_id,
                 Booking.date >= start_of_day,
@@ -120,12 +120,17 @@ class DashboardService:
             "bookings": [
                 {
                     "id": str(b.id),
+                    "date": b.date.isoformat(),
+                    "end_time": b.end_time.isoformat(),
                     "time": b.date.strftime("%H:%M"),
                     "client_id": str(b.client_id),
+                    "client_name": f"{b.client.first_name} {b.client.last_name}".strip() or "Unknown Client",
                     "service_id": str(b.service_id),
+                    "service_name": b.service.name or "Unknown Service",
                     "master_id": str(b.master_id),
                     "status": b.status.value,
-                    "price": b.price
+                    "price": b.price,
+                    "duration": int((b.end_time - b.date).total_seconds() / 60)
                 }
                 for b in bookings
             ]

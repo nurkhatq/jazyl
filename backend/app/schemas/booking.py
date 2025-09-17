@@ -31,6 +31,8 @@ class BookingResponse(BookingBase):
     id: UUID
     tenant_id: UUID
     client_id: UUID
+    client_name: Optional[str] = None
+    service_name: Optional[str] = None
     end_time: datetime
     status: BookingStatus
     price: float
