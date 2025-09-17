@@ -11,7 +11,7 @@ from app.models.user import User, UserRole
 from app.schemas.master import MasterCreate, MasterUpdate
 from passlib.context import CryptContext
 
-from backend.app.models.tenant import Tenant
+from app.models.tenant import Tenant
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
