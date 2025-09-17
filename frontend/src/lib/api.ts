@@ -576,6 +576,40 @@ export const getServices = async (tenantId?: string) => {
     throw error
   }
 }
+export const getServicesPublic = async (subdomain: string) => {
+  try {
+    const response = await api.get('/api/services/public', {
+      headers: { 'X-Tenant-Subdomain': subdomain }
+    })
+    return response.data
+  } catch (error) {
+    console.error('Error getting public services:', error)
+    return []
+  }
+}
+
+export const checkAvailability = async (
+  tenantId: string,
+  masterId: string,
+  date: string,
+  serviceId: string
+) => {
+  try {
+    const response = await api.get('/api/bookings/availability/check', {
+      params: {
+        master_id: masterId,
+        date: date,
+        service_id: serviceId
+      },
+      headers: { 'X-Tenant-ID': tenantId }
+    })
+    return response.data
+  } catch (error) {
+    console.error('Error checking availability:', error)
+    return { available: false }
+  }
+}
+
 
 // ====================== PUBLIC SERVICES API (for barbershop pages) ======================
 export const getPublicServices = async () => {
@@ -728,6 +762,253 @@ export const getBookings = async (filters?: any) => {
   const response = await api.get('/api/bookings', { params: filters })
   return response.data
 }
+
+export const sendVerificationEmail = async (tenantId: string, email: string) => {
+  try {
+    const response = await api.post(
+      '/api/bookings/verify-email',
+      { email },
+      { headers: { 'X-Tenant-ID': tenantId } }
+    )
+    return response.data
+  } catch (error) {
+    console.error('Error sending verification email:', error)
+    throw error
+  }
+}
+
+export const createBookingWithVerification = async (
+  tenantId: string,
+  bookingData: {
+    master_id: string
+    service_id: string
+    date: string
+    client_name: string
+    client_email: string
+    client_phone: string
+    email_verification_token: string
+    price: number
+  }
+) => {
+  try {
+    const response = await api.post(
+      '/api/bookings/create',
+      bookingData,
+      { headers: { 'X-Tenant-ID': tenantId } }
+    )
+    return response.data
+  } catch (error) {
+    console.error('Error creating booking:', error)
+    throw error
+  }
+}
+
+export const getClientBookings = async (tenantId: string, email: string) => {
+  try {
+    const response = await api.get('/api/bookings/my-bookings', {
+      params: { email },
+      headers: { 'X-Tenant-ID': tenantId }
+    })
+    return response.data
+  } catch (error) {
+    console.error('Error getting client bookings:', error)
+    return { bookings: [] }
+  }
+}
+
+/**
+ * Отменить бронирование
+ */
+export const cancelClientBooking = async (
+  tenantId: string,
+  bookingId: string,
+  cancellationToken: string,
+  reason?: string
+) => {
+  try {
+    const response = await api.post(
+      `/api/bookings/${bookingId}/cancel`,
+      { reason },
+      {
+        params: { cancellation_token: cancellationToken },
+        headers: { 'X-Tenant-ID': tenantId }
+      }
+    )
+    return response.data
+  } catch (error) {
+    console.error('Error cancelling booking:', error)
+    throw error
+  }
+}
+export const getMasterSchedule = async (
+  tenantId: string,
+  masterId: string,
+  startDate: string,
+  endDate: string
+) => {
+  try {
+    const response = await api.get(`/api/masters/${masterId}/schedule`, {
+      params: {
+        start_date: startDate,
+        end_date: endDate
+      },
+      headers: { 'X-Tenant-ID': tenantId }
+    })
+    return response.data
+  } catch (error) {
+    console.error('Error getting master schedule:', error)
+    return { schedule: [] }
+  }
+}
+export const getMasterReviews = async (
+  tenantId: string,
+  masterId: string,
+  page: number = 1,
+  limit: number = 10
+) => {
+  try {
+    const response = await api.get(`/api/masters/${masterId}/reviews`, {
+      params: { page, limit },
+      headers: { 'X-Tenant-ID': tenantId }
+    })
+    return response.data
+  } catch (error) {
+    console.error('Error getting master reviews:', error)
+    return { reviews: [], total: 0 }
+  }
+}
+
+/**
+ * Добавить отзыв о мастере (после завершения визита)
+ */
+export const addMasterReview = async (
+  tenantId: string,
+  bookingId: string,
+  reviewData: {
+    rating: number
+    comment?: string
+  }
+) => {
+  try {
+    const response = await api.post(
+      `/api/bookings/${bookingId}/review`,
+      reviewData,
+      { headers: { 'X-Tenant-ID': tenantId } }
+    )
+    return response.data
+  } catch (error) {
+    console.error('Error adding review:', error)
+    throw error
+  }
+}
+
+export const getTenantWorkingHours = async (tenantId: string) => {
+  try {
+    const response = await api.get(`/api/tenants/${tenantId}/working-hours`)
+    return response.data
+  } catch (error) {
+    console.error('Error getting working hours:', error)
+    return {}
+  }
+}
+
+/**
+ * Подписаться на рассылку барбершопа
+ */
+export const subscribeToNewsletter = async (
+  tenantId: string,
+  email: string,
+  name?: string
+) => {
+  try {
+    const response = await api.post(
+      '/api/newsletter/subscribe',
+      { email, name },
+      { headers: { 'X-Tenant-ID': tenantId } }
+    )
+    return response.data
+  } catch (error) {
+    console.error('Error subscribing to newsletter:', error)
+    throw error
+  }
+}
+
+/**
+ * Проверить статус подтверждения email для бронирования
+ */
+export const verifyBookingEmailToken = async (
+  tenantId: string,
+  token: string
+) => {
+  try {
+    const response = await api.post(
+      '/api/bookings/verify-email-token',
+      { token },
+      { headers: { 'X-Tenant-ID': tenantId } }
+    )
+    return response.data
+  } catch (error) {
+    console.error('Error verifying email token:', error)
+    throw error
+  }
+}
+
+/**
+ * Получить ближайшие доступные даты для мастера
+ */
+export const getNearestAvailableDates = async (
+  tenantId: string,
+  masterId: string,
+  serviceId: string,
+  daysAhead: number = 7
+) => {
+  try {
+    const response = await api.get('/api/bookings/availability/nearest', {
+      params: {
+        master_id: masterId,
+        service_id: serviceId,
+        days_ahead: daysAhead
+      },
+      headers: { 'X-Tenant-ID': tenantId }
+    })
+    return response.data
+  } catch (error) {
+    console.error('Error getting nearest dates:', error)
+    return { dates: [] }
+  }
+}
+
+/**
+ * Получить популярные услуги
+ */
+export const getPopularServices = async (tenantId: string, limit: number = 5) => {
+  try {
+    const response = await api.get('/api/services/popular', {
+      params: { limit },
+      headers: { 'X-Tenant-ID': tenantId }
+    })
+    return response.data
+  } catch (error) {
+    console.error('Error getting popular services:', error)
+    return []
+  }
+}
+
+/**
+ * Получить информацию о скидках и акциях
+ */
+export const getPromotions = async (tenantId: string) => {
+  try {
+    const response = await api.get('/api/promotions', {
+      headers: { 'X-Tenant-ID': tenantId }
+    })
+    return response.data
+  } catch (error) {
+    console.error('Error getting promotions:', error)
+    return []
+  }
+}
+
 
 export const confirmBooking = async (bookingId: string, token: string) => {
   const response = await api.post(`/api/bookings/${bookingId}/confirm`, null, {

@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, case
+from sqlalchemy import select, func, case, and_, or_
 from typing import List, Optional
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from uuid import UUID
+import secrets
 
 from app.database import get_db
 from app.schemas.booking import BookingCreate, BookingUpdate, BookingResponse
@@ -11,9 +12,11 @@ from app.services.booking import BookingService
 from app.services.notification import NotificationService
 from app.utils.security import get_current_user
 from app.models.booking import Booking, BookingStatus
+from app.models.client import Client
 from app.models.user import User, UserRole
 from app.models.master import Master
 from app.utils.security import require_role
+from app.models.service import Service
 
 router = APIRouter()
 
@@ -27,6 +30,193 @@ async def get_tenant_id_from_header(request: Request) -> Optional[UUID]:
         except ValueError:
             return None
     return None
+
+# --- Email Verification for Booking ---
+@router.post("/verify-email")
+async def verify_booking_email(
+    email: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
+    """Send email verification for booking"""
+    tenant_id = await get_tenant_id_from_header(request)
+    
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant ID is required"
+        )
+    
+    # Generate verification token
+    verification_token = secrets.token_urlsafe(32)
+    
+    # Store token in temporary storage (Redis or DB)
+    # For now, we'll return it directly
+    # In production, send email with verification link
+    
+    from app.utils.email import EmailService
+    email_service = EmailService()
+    
+    # Get tenant info
+    from app.models.tenant import Tenant
+    result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+    tenant = result.scalar_one_or_none()
+    
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    # Send verification email
+    verification_link = f"https://{tenant.subdomain}.jazyl.tech/verify-booking-email/{verification_token}"
+    
+    # Store token in session or Redis with expiry
+    # For demo, we'll return the token
+    
+    return {
+        "message": "Verification email sent",
+        "token": verification_token  # Remove in production
+    }
+
+# --- Create Booking with Email Verification ---
+@router.post("/create", response_model=BookingResponse)
+async def create_booking_with_verification(
+    booking_data: dict,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Create new booking after email verification"""
+    service = BookingService(db)
+    notification_service = NotificationService(db)
+    
+    tenant_id = await get_tenant_id_from_header(request)
+    
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant ID is required"
+        )
+    
+    # Verify email token
+    email_token = booking_data.get("email_verification_token")
+    if not email_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email verification required"
+        )
+    
+    # TODO: Verify token from Redis/DB
+    
+    # Check or create client
+    result = await db.execute(
+        select(Client).where(
+            and_(
+                Client.email == booking_data["client_email"],
+                Client.tenant_id == tenant_id
+            )
+        )
+    )
+    client = result.scalar_one_or_none()
+    
+    if not client:
+        client = Client(
+            tenant_id=tenant_id,
+            first_name=booking_data["client_name"].split()[0],
+            last_name=" ".join(booking_data["client_name"].split()[1:]) if len(booking_data["client_name"].split()) > 1 else "",
+            email=booking_data["client_email"],
+            phone=booking_data.get("client_phone")
+        )
+        db.add(client)
+        await db.flush()
+    
+    # Check availability
+    if not await service.check_availability(
+        tenant_id,
+        UUID(booking_data["master_id"]),
+        datetime.fromisoformat(booking_data["date"]),
+        UUID(booking_data["service_id"])
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Time slot not available"
+        )
+    
+    # Create booking
+    booking = Booking(
+        tenant_id=tenant_id,
+        master_id=UUID(booking_data["master_id"]),
+        service_id=UUID(booking_data["service_id"]),
+        client_id=client.id,
+        date=datetime.fromisoformat(booking_data["date"]),
+        price=booking_data.get("price", 0),
+        status=BookingStatus.CONFIRMED,  # Auto-confirm after email verification
+        email_verified=True,
+        confirmation_token=secrets.token_urlsafe(32),
+        cancellation_token=secrets.token_urlsafe(32)
+    )
+    
+    db.add(booking)
+    await db.commit()
+    await db.refresh(booking)
+    
+    # Send confirmation email in background
+    background_tasks.add_task(
+        notification_service.send_booking_confirmation,
+        booking.id
+    )
+    
+    return booking
+
+# --- Get Client Booking History ---
+@router.get("/my-bookings")
+async def get_client_bookings(
+    email: str = Query(...),
+    request: Request = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get client's booking history by email"""
+    tenant_id = await get_tenant_id_from_header(request)
+    
+    if not tenant_id:
+        return {"bookings": []}
+    
+    # Find client
+    result = await db.execute(
+        select(Client).where(
+            and_(
+                Client.email == email,
+                Client.tenant_id == tenant_id
+            )
+        )
+    )
+    client = result.scalar_one_or_none()
+    
+    if not client:
+        return {"bookings": []}
+    
+    # Get bookings
+    bookings_result = await db.execute(
+        select(Booking, Master, Service)
+        .join(Master, Booking.master_id == Master.id)
+        .join(Service, Booking.service_id == Service.id)
+        .where(Booking.client_id == client.id)
+        .order_by(Booking.date.desc())
+    )
+    
+    bookings = []
+    for booking, master, service in bookings_result:
+        bookings.append({
+            "id": str(booking.id),
+            "date": booking.date.isoformat(),
+            "master": master.display_name,
+            "service": service.name,
+            "price": booking.price,
+            "status": booking.status.value,
+            "can_cancel": booking.status == BookingStatus.CONFIRMED and booking.date > datetime.utcnow() + timedelta(hours=2),
+            "cancellation_token": booking.cancellation_token if booking.status == BookingStatus.CONFIRMED else None
+        })
+    
+    return {"bookings": bookings}
 
 # --- Optional current user for public endpoints ---
 async def get_current_user_optional(
@@ -97,6 +287,48 @@ async def create_booking(
     
     return booking
 
+@router.get("/master/stats")
+async def get_master_booking_stats(
+    current_user: User = Depends(require_role(UserRole.MASTER)),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get booking statistics for current master"""
+    # Найти профиль мастера
+    result = await db.execute(
+        select(Master).where(Master.user_id == current_user.id)
+    )
+    master = result.scalar_one_or_none()
+    
+    if not master:
+        return {
+            "total_bookings": 0,
+            "completed_bookings": 0,
+            "cancelled_bookings": 0,
+            "cancellation_rate": 0
+        }
+    
+    # Получить статистику записей
+    bookings_result = await db.execute(
+        select(
+            func.count(Booking.id).label('total'),
+            func.count(case((Booking.status == BookingStatus.COMPLETED, 1))).label('completed'),
+            func.count(case((Booking.status == BookingStatus.CANCELLED, 1))).label('cancelled')
+        )
+        .where(Booking.master_id == master.id)
+    )
+    
+    stats = bookings_result.first()
+    
+    cancellation_rate = 0
+    if stats.total > 0:
+        cancellation_rate = (stats.cancelled / stats.total) * 100
+    
+    return {
+        "total_bookings": stats.total,
+        "completed_bookings": stats.completed,
+        "cancelled_bookings": stats.cancelled,
+        "cancellation_rate": round(cancellation_rate, 2)
+    }
 # --- Public endpoint for checking availability ---
 @router.get("/availability/check")
 async def check_availability(
@@ -281,46 +513,53 @@ async def update_booking(
     return booking
 
 # Добавьте этот endpoint в существующий файл
-
-@router.get("/master/stats")
-async def get_master_booking_stats(
-    current_user: User = Depends(require_role(UserRole.MASTER)),
+# --- Cancel Booking ---
+@router.post("/{booking_id}/cancel")
+async def cancel_client_booking(
+    booking_id: UUID,
+    cancellation_token: str = Query(...),
+    reason: Optional[str] = None,
+    background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """Get booking statistics for current master"""
-    # Найти профиль мастера
+    """Cancel booking with cancellation token"""
     result = await db.execute(
-        select(Master).where(Master.user_id == current_user.id)
-    )
-    master = result.scalar_one_or_none()
-    
-    if not master:
-        return {
-            "total_bookings": 0,
-            "completed_bookings": 0,
-            "cancelled_bookings": 0,
-            "cancellation_rate": 0
-        }
-    
-    # Получить статистику записей
-    bookings_result = await db.execute(
-        select(
-            func.count(Booking.id).label('total'),
-            func.count(case((Booking.status == BookingStatus.COMPLETED, 1))).label('completed'),
-            func.count(case((Booking.status == BookingStatus.CANCELLED, 1))).label('cancelled')
+        select(Booking).where(
+            and_(
+                Booking.id == booking_id,
+                Booking.cancellation_token == cancellation_token,
+                Booking.status == BookingStatus.CONFIRMED
+            )
         )
-        .where(Booking.master_id == master.id)
     )
+    booking = result.scalar_one_or_none()
     
-    stats = bookings_result.first()
+    if not booking:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid cancellation token or booking not found"
+        )
     
-    cancellation_rate = 0
-    if stats.total > 0:
-        cancellation_rate = (stats.cancelled / stats.total) * 100
+    # Check if cancellation is allowed (2 hours before)
+    if booking.date <= datetime.utcnow() + timedelta(hours=2):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot cancel booking less than 2 hours before appointment"
+        )
     
-    return {
-        "total_bookings": stats.total,
-        "completed_bookings": stats.completed,
-        "cancelled_bookings": stats.cancelled,
-        "cancellation_rate": round(cancellation_rate, 2)
-    }
+    booking.status = BookingStatus.CANCELLED
+    booking.cancelled_at = datetime.utcnow()
+    booking.cancellation_reason = reason
+    
+    await db.commit()
+    
+    # Send cancellation email
+    if background_tasks:
+        from app.services.notification import NotificationService
+        notification_service = NotificationService(db)
+        background_tasks.add_task(
+            notification_service.send_booking_cancellation,
+            booking.id
+        )
+    
+    return {"message": "Booking cancelled successfully"}

@@ -1,102 +1,107 @@
-import { NextRequest, NextResponse } from 'next/server'
+// frontend/src/middleware.ts
+import { NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
 
 export function middleware(request: NextRequest) {
   const hostname = request.headers.get('host') || ''
   const pathname = request.nextUrl.pathname
   
-  console.log('🔍 MIDDLEWARE:', { hostname, pathname })
+  console.log('🔍 [MIDDLEWARE] Processing:', { hostname, pathname })
   
-  // Получаем subdomain
+  // Extract subdomain
   let subdomain = ''
-  
-  if (hostname.includes('.jazyl.tech')) {
-    const hostParts = hostname.split('.jazyl.tech')[0]
-    subdomain = hostParts
+  if (hostname.includes('.')) {
+    subdomain = hostname.split('.')[0]
+  } else if (hostname.includes('localhost')) {
+    subdomain = 'localhost'
   }
   
-  console.log('🔍 SUBDOMAIN:', subdomain)
+  console.log('🔍 [MIDDLEWARE] Subdomain:', subdomain)
   
-  // Если это основной домен jazyl.tech
-  if (!subdomain || subdomain === 'www' || subdomain === 'jazyl') {
-    console.log('🌐 MAIN DOMAIN')
+  // Main platform domains
+  const isPlatformDomain = subdomain === 'jazyl' || 
+                          subdomain === 'www' || 
+                          subdomain === 'localhost' ||
+                          subdomain === ''
+  
+  // Platform paths (admin, dashboard, auth, etc.)
+  const isPlatformPath = pathname.startsWith('/dashboard') ||
+                         pathname.startsWith('/admin') ||
+                         pathname.startsWith('/owner') ||
+                         pathname.startsWith('/master') ||
+                         pathname.startsWith('/login') ||
+                         pathname.startsWith('/register') ||
+                         pathname.startsWith('/auth') ||
+                         pathname.startsWith('/api') ||
+                         pathname.startsWith('/set-password') ||
+                         pathname.startsWith('/forgot-password') ||
+                         pathname.startsWith('/verify-email')
+  
+  console.log('🔍 [MIDDLEWARE] Is platform?', { isPlatformDomain, isPlatformPath })
+  
+  // === PLATFORM SITE ===
+  if (isPlatformDomain) {
+    console.log('✅ [MIDDLEWARE] Platform domain, allowing:', pathname)
     
-    // Если пользователь заходит на jazyl.tech/dashboard - это админка основной платформы
-    if (pathname.startsWith('/dashboard')) {
-      console.log('🔐 PLATFORM ADMIN ACCESS')
-      
-      // Проверяем аутентификацию для admin путей
-      const isAuthPath = pathname.startsWith('/login') || pathname.startsWith('/register')
-      const isPublicPath = pathname.startsWith('/_next') || 
-                          pathname.startsWith('/api') || 
-                          pathname === '/favicon.ico' ||
-                          pathname === '/robots.txt' ||
-                          pathname === '/404'
-      
-      if (!isAuthPath && !isPublicPath) {
-        // Проверяем есть ли токен
-        const accessToken = request.cookies.get('access-token')
-        
-        if (!accessToken) {
-          console.log('🚫 No auth token, redirecting to login')
-          return NextResponse.redirect(new URL('/login', request.url))
-        }
-      }
-      
-      console.log('🟢 PLATFORM ADMIN PATH, allowing:', pathname)
-      return NextResponse.next()
-    }
-    
-    // Для остальных путей на jazyl.tech показываем платформу
-    if (pathname === '/') {
-      return NextResponse.rewrite(new URL('/platform', request.url))
-    }
-    
-    return NextResponse.next()
+    // Add headers for API calls
+    const response = NextResponse.next()
+    response.headers.set('X-Site-Type', 'platform')
+    return response
   }
   
-  // Если это поддомен (клиентская страница <barber-name>.jazyl.tech)
-  if (subdomain) {
-    console.log('🌐 CLIENT ACCESS for subdomain:', subdomain)
+  // === CLIENT SITE (barbershop subdomain) ===
+  if (!isPlatformDomain) {
+    console.log('🏪 [MIDDLEWARE] Client domain:', subdomain)
     
-    // Разрешенные публичные пути для клиентов
-    const isPublicClientPath = pathname === '/' ||
-                              pathname.startsWith('/_next') ||
-                              pathname.startsWith('/api') ||
-                              pathname === '/favicon.ico' ||
-                              pathname === '/robots.txt' ||
-                              pathname.startsWith('/booking') ||
-                              pathname.startsWith('/confirm') ||
-                              pathname.startsWith('/cancel') ||
-                              pathname.startsWith('/login') ||
-                              pathname.startsWith('/register') ||
-                              pathname.startsWith('/forgot-password') ||
-                              pathname.startsWith('/verify-email') ||
-                              pathname.startsWith('/set-password') ||
-                              pathname === '/404'
-    
-    if (isPublicClientPath) {
-      console.log('🟢 PUBLIC PATH, allowing:', pathname)
-      return NextResponse.next()
+    // Block platform paths on client sites
+    if (isPlatformPath && !pathname.startsWith('/api')) {
+      console.log('❌ [MIDDLEWARE] Blocking platform path on client site:', pathname)
+      return NextResponse.rewrite(new URL('/404', request.url))
     }
     
-    // Если путь не найден для клиентского сайта, показываем 404
-    console.log('❌ Path not found for client site:', pathname)
+    // Client site allowed paths
+    const isClientPath = pathname === '/' ||
+                        pathname === '/my-bookings' ||
+                        pathname.startsWith('/booking/confirm') ||
+                        pathname.startsWith('/booking/cancel') ||
+                        pathname.startsWith('/master/') ||
+                        pathname.startsWith('/service') ||
+                        pathname.startsWith('/api') ||
+                        pathname === '/404' ||
+                        // Static assets
+                        pathname.startsWith('/_next') ||
+                        pathname.startsWith('/static') ||
+                        pathname.includes('.') // files with extensions
+    
+    if (isClientPath) {
+      console.log('✅ [MIDDLEWARE] Client path allowed:', pathname)
+      
+      // Add subdomain header for API calls
+      const response = NextResponse.next()
+      response.headers.set('X-Tenant-Subdomain', subdomain)
+      response.headers.set('X-Site-Type', 'client')
+      
+      return response
+    }
+    
+    // Path not found for client site
+    console.log('❌ [MIDDLEWARE] Path not found for client site:', pathname)
     return NextResponse.rewrite(new URL('/404', request.url))
   }
   
-  console.log('🟢 FALLBACK, allowing:', pathname)
+  console.log('✅ [MIDDLEWARE] Default allow:', pathname)
   return NextResponse.next()
 }
 
 export const config = {
   matcher: [
     /*
-     * Match all request paths except for the ones starting with:
+     * Match all request paths except:
      * - _next/static (static files)
      * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - robots.txt
+     * - favicon.ico, robots.txt (metadata files)
+     * - public folder
      */
-    '/((?!_next/static|_next/image|favicon.ico|robots.txt).*)',
+    '/((?!_next/static|_next/image|favicon.ico|robots.txt|public/).*)',
   ],
 }
