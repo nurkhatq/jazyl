@@ -21,6 +21,7 @@ from app.schemas.master import (
     MasterStatsResponse, TodayBookingsResponse
 )
 from app.models.permission_request import PermissionRequestType
+from app.models.master import MasterSchedule
 from app.services.master import MasterService
 from app.services.file_upload import FileUploadService
 from app.services.permission_request import PermissionRequestService
@@ -37,6 +38,52 @@ async def get_tenant_id_from_header(request: Request) -> Optional[UUID]:
         except ValueError:
             return None
     return None
+
+async def create_default_schedule(master_id: UUID, db: AsyncSession):
+    """Создать расписание по умолчанию для мастера"""
+    try:
+        # Создаем расписание с понедельника по пятницу 9:00-18:00
+        default_schedules = []
+        for day in range(5):  # Понедельник-Пятница (0-4)
+            schedule = MasterSchedule(
+                master_id=master_id,
+                day_of_week=day,
+                start_time="09:00",
+                end_time="18:00",
+                is_working=True
+            )
+            default_schedules.append(schedule)
+        
+        # Суббота 10:00-16:00
+        saturday_schedule = MasterSchedule(
+            master_id=master_id,
+            day_of_week=5,  # Суббота
+            start_time="10:00",
+            end_time="16:00",
+            is_working=True
+        )
+        default_schedules.append(saturday_schedule)
+        
+        # Воскресенье - выходной
+        sunday_schedule = MasterSchedule(
+            master_id=master_id,
+            day_of_week=6,  # Воскресенье
+            start_time="00:00",
+            end_time="00:00",
+            is_working=False
+        )
+        default_schedules.append(sunday_schedule)
+        
+        # Добавляем все расписания в базу
+        for schedule in default_schedules:
+            db.add(schedule)
+        
+        await db.commit()
+        print(f"✅ Created default schedule for master {master_id}")
+        
+    except Exception as e:
+        print(f"❌ Error creating default schedule: {e}")
+        # Не поднимаем исключение, чтобы не сломать создание мастера
 
 # ====================== ⭐ ВАЖНО: СПЕЦИФИЧНЫЕ РОУТЫ ИДУТ ПЕРВЫМИ! ======================
 # Все роуты с фиксированными путями должны быть ПЕРЕД параметрическими /{master_id}
@@ -89,6 +136,10 @@ async def get_my_profile(
             db.add(master)
             await db.commit()
             await db.refresh(master)
+            
+            # Создаем расписание по умолчанию
+            await create_default_schedule(master.id, db)
+            
             print(f"✅ Created master profile for user {current_user.email}")
         else:
             print(f"✅ Found existing master profile: {master.display_name}")
@@ -100,6 +151,16 @@ async def get_my_profile(
                 master.updated_at = datetime.utcnow()
             await db.commit()
             await db.refresh(master)
+            
+            # Проверяем есть ли расписание, если нет - создаем по умолчанию
+            schedule_result = await db.execute(
+                select(MasterSchedule).where(MasterSchedule.master_id == master.id)
+            )
+            existing_schedules = schedule_result.scalars().all()
+            
+            if not existing_schedules:
+                print(f"⚠️ No schedule found for master {master.id}, creating default...")
+                await create_default_schedule(master.id, db)
         
         return master
         
@@ -818,10 +879,10 @@ async def get_masters_list(
 async def upload_master_photo(
     master_id: UUID,
     photo: UploadFile = File(...),
-    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN, UserRole.MASTER])),
     db: AsyncSession = Depends(get_db)
 ):
-    """Загрузить фото мастера по ID (только для админов/владельцев)"""
+    """Загрузить фото мастера по ID"""
     try:
         result = await db.execute(
             select(Master).where(Master.id == master_id)
@@ -830,6 +891,15 @@ async def upload_master_photo(
         
         if not master:
             raise HTTPException(status_code=404, detail="Master not found")
+        
+        # Проверяем права доступа
+        if current_user.role == UserRole.MASTER:
+            # Мастер может загружать фото только для своего профиля
+            if master.user_id != current_user.id:
+                raise HTTPException(
+                    status_code=403, 
+                    detail="You can only upload photos for your own profile"
+                )
         
         # Проверяем тип файла
         if not photo.content_type or not photo.content_type.startswith('image/'):
@@ -923,10 +993,10 @@ async def create_master(
 async def update_master(
     master_id: UUID,
     master_data: MasterUpdate,
-    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN, UserRole.MASTER])),
     db: AsyncSession = Depends(get_db)
 ):
-    """Обновить мастера (только для владельцев/админов)"""
+    """Обновить мастера"""
     # Проверяем что мастер существует и принадлежит тому же тенанту
     result = await db.execute(
         select(Master).where(
@@ -943,6 +1013,15 @@ async def update_master(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Master not found"
         )
+    
+    # Проверяем права доступа
+    if current_user.role == UserRole.MASTER:
+        # Мастер может обновлять только свой профиль
+        if master.user_id != current_user.id:
+            raise HTTPException(
+                status_code=403, 
+                detail="You can only update your own profile"
+            )
     
     # Обновляем только переданные поля
     update_data = master_data.dict(exclude_unset=True)
