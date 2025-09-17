@@ -41,9 +41,9 @@ api.interceptors.request.use(
       if (hostname.includes('.jazyl.tech') && !hostname.startsWith('www.') && !hostname.startsWith('api.')) {
         let subdomain = hostname.split('.jazyl.tech')[0]
         
-        // Убираем admin. если есть
-        if (subdomain.startsWith('admin.')) {
-          subdomain = subdomain.replace('admin.', '')
+        // Специальная обработка для admin.jazyl.tech - это публичная страница барбершопа "admin"
+        if (subdomain === 'admin') {
+          // Оставляем subdomain как 'admin'
         }
         
         if (subdomain && subdomain !== 'jazyl') {

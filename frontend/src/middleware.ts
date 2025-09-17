@@ -11,9 +11,10 @@ export function middleware(request: NextRequest) {
   if (hostname.includes('.jazyl.tech')) {
     const hostParts = hostname.split('.jazyl.tech')[0]
     
-    if (hostParts.startsWith('admin.')) {
-      isAdmin = true
-      subdomain = hostParts.substring(6) // убираем 'admin.'
+    // Специальная обработка для admin.jazyl.tech - это публичная страница барбершопа "admin"
+    if (hostParts === 'admin') {
+      subdomain = 'admin'
+      isAdmin = false // Это не админка, а публичная страница
     } else {
       subdomain = hostParts
     }
@@ -58,31 +59,6 @@ export function middleware(request: NextRequest) {
     return NextResponse.next()
   }
   
-  // Если это admin поддомен (admin.<barber-name>.jazyl.tech)
-  if (isAdmin && subdomain) {
-    console.log('🔐 BARBERSHOP ADMIN ACCESS for:', subdomain)
-    
-    // Проверяем аутентификацию для admin путей
-    const isAuthPath = pathname.startsWith('/login') || pathname.startsWith('/register')
-    const isPublicPath = pathname.startsWith('/_next') || 
-                        pathname.startsWith('/api') || 
-                        pathname === '/favicon.ico' ||
-                        pathname === '/robots.txt' ||
-                        pathname === '/404'
-    
-    if (!isAuthPath && !isPublicPath) {
-      // Проверяем есть ли токен
-      const accessToken = request.cookies.get('access-token')
-      
-      if (!accessToken) {
-        console.log('🚫 No auth token, redirecting to login')
-        return NextResponse.redirect(new URL('/login', request.url))
-      }
-    }
-    
-    console.log('🟢 BARBERSHOP ADMIN PATH, allowing:', pathname)
-    return NextResponse.next()
-  }
   
   // Если это обычный поддомен (клиентская страница <barber-name>.jazyl.tech)
   if (subdomain && !isAdmin) {
