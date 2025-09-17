@@ -4,34 +4,21 @@ export function middleware(request: NextRequest) {
   const hostname = request.headers.get('host') || ''
   const pathname = request.nextUrl.pathname
   
-  console.log('🔍 MIDDLEWARE DEBUG:', { hostname, pathname })
+  console.log('🔍 MIDDLEWARE:', { hostname, pathname })
   
   // Получаем subdomain
   let subdomain = ''
-  let isAdmin = false
   
   if (hostname.includes('.jazyl.tech')) {
     const hostParts = hostname.split('.jazyl.tech')[0]
-    console.log('🔍 HOST PARTS:', hostParts)
-    
-    // Специальная обработка для admin.jazyl.tech - это публичная страница барбершопа "admin"
-    if (hostParts === 'admin') {
-      subdomain = 'admin'
-      isAdmin = false // Это не админка, а публичная страница
-    } else {
-      subdomain = hostParts
-    }
+    subdomain = hostParts
   }
   
-  console.log('🔍 PARSED:', { subdomain, isAdmin })
+  console.log('🔍 SUBDOMAIN:', subdomain)
   
-  // ИСПРАВЛЕНО: правильная обработка jazyl.tech
-  // Если это основной домен jazyl.tech (БЕЗ admin префикса)
-  const isMainDomain = (!subdomain || subdomain === 'www' || subdomain === 'jazyl') && !isAdmin
-  console.log('🔍 MAIN DOMAIN CHECK:', { isMainDomain, subdomain, isAdmin })
-  
-  if (isMainDomain) {
-    console.log('🌐 MAIN DOMAIN:', hostname, 'pathname:', pathname)
+  // Если это основной домен jazyl.tech
+  if (!subdomain || subdomain === 'www' || subdomain === 'jazyl') {
+    console.log('🌐 MAIN DOMAIN')
     
     // Если пользователь заходит на jazyl.tech/dashboard - это админка основной платформы
     if (pathname.startsWith('/dashboard')) {
@@ -67,13 +54,9 @@ export function middleware(request: NextRequest) {
     return NextResponse.next()
   }
   
-  
-  // Если это обычный поддомен (клиентская страница <barber-name>.jazyl.tech)
-  const isClientSubdomain = subdomain && !isAdmin
-  console.log('🔍 CLIENT SUBDOMAIN CHECK:', { isClientSubdomain, subdomain, isAdmin })
-  
-  if (isClientSubdomain) {
-    console.log('🌐 CLIENT ACCESS for subdomain:', subdomain, 'pathname:', pathname)
+  // Если это поддомен (клиентская страница <barber-name>.jazyl.tech)
+  if (subdomain) {
+    console.log('🌐 CLIENT ACCESS for subdomain:', subdomain)
     
     // Разрешенные публичные пути для клиентов
     const isPublicClientPath = pathname === '/' ||
@@ -96,17 +79,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.rewrite(new URL('/404', request.url))
   }
   
-  console.log('🟢 MIDDLEWARE: {')
-  console.log('  hostname:', hostname + ',')
-  console.log('  subdomain:', `'${subdomain}',`)
-  console.log('  pathname:', `'${pathname}',`)
-  console.log('  cookies: {')
-  console.log('  auth-user:', `'${request.cookies.get('auth-user')?.value?.substring(0, 50) + '...' || 'undefined...'}',`)
-  console.log('  auth-data:', `'${request.cookies.get('auth-data')?.value?.substring(0, 50) + '...' || 'undefined...'}',`)
-  console.log('  access-token:', `'${request.cookies.get('access-token')?.value?.substring(0, 50) + '...' || 'undefined...'}'`)
-  console.log('}')
-  console.log('}')
-  
+  console.log('🟢 FALLBACK, allowing:', pathname)
   return NextResponse.next()
 }
 
