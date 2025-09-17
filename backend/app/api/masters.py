@@ -29,6 +29,65 @@ from app.utils.security import get_current_master, get_current_user, require_rol
 
 router = APIRouter()
 
+# ---------------------- Public API endpoints for barbershop pages ----------------------
+
+@router.get("/public", response_model=List[MasterResponse])
+async def get_public_masters(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get masters for public barbershop page (no auth required)"""
+    # Get tenant_id from X-Tenant-Subdomain header
+    subdomain = request.headers.get("X-Tenant-Subdomain")
+    if not subdomain:
+        return []
+    
+    # Get tenant by subdomain
+    tenant_result = await db.execute(
+        select(Tenant).where(Tenant.subdomain == subdomain)
+    )
+    tenant = tenant_result.scalar_one_or_none()
+    
+    if not tenant:
+        return []
+    
+    # Get visible masters for this tenant
+    masters_result = await db.execute(
+        select(Master)
+        .where(and_(
+            Master.tenant_id == tenant.id,
+            Master.is_active == True,
+            Master.is_visible == True
+        ))
+    )
+    masters = masters_result.scalars().all()
+    
+    return [
+        MasterResponse(
+            id=master.id,
+            user_id=master.user_id,
+            display_name=master.display_name,
+            specialization=master.specialization,
+            experience_years=master.experience_years,
+            rating=master.rating,
+            reviews_count=master.reviews_count,
+            bio=master.bio,
+            photo_url=master.photo_url,
+            is_active=master.is_active,
+            is_visible=master.is_visible,
+            created_at=master.created_at,
+            updated_at=master.updated_at,
+            # Public endpoints don't need permission fields
+            can_edit_profile=False,
+            can_edit_schedule=False,
+            can_edit_services=False,
+            can_manage_bookings=False,
+            can_view_analytics=False,
+            can_upload_photos=False
+        )
+        for master in masters
+    ]
+
 # ---------------------- Utility functions ----------------------
 async def get_tenant_id_from_header(request: Request) -> Optional[UUID]:
     tenant_id_str = request.headers.get("X-Tenant-ID")

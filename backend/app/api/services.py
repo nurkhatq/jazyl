@@ -5,11 +5,46 @@ from uuid import UUID
 
 from app.database import get_db
 from app.models.user import User, UserRole
+from app.models.tenant import Tenant
 from app.schemas.service import ServiceCreate, ServiceUpdate, ServiceResponse
 from app.services.service import ServiceService
 from app.utils.security import get_current_user, require_role
+from sqlalchemy import select
 
 router = APIRouter()
+
+# ---------------------- Public API endpoints for barbershop pages ----------------------
+
+@router.get("/public", response_model=List[ServiceResponse])
+async def get_public_services(
+    request: Request,
+    category_id: Optional[UUID] = Query(None),
+    is_active: Optional[bool] = Query(True),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get services for public barbershop page (no auth required)"""
+    # Get tenant_id from X-Tenant-Subdomain header
+    subdomain = request.headers.get("X-Tenant-Subdomain")
+    if not subdomain:
+        return []
+    
+    # Get tenant by subdomain
+    tenant_result = await db.execute(
+        select(Tenant).where(Tenant.subdomain == subdomain)
+    )
+    tenant = tenant_result.scalar_one_or_none()
+    
+    if not tenant:
+        return []
+    
+    # Get active services for this tenant
+    service = ServiceService(db)
+    services = await service.get_services(
+        tenant_id=tenant.id,
+        category_id=category_id, 
+        is_active=is_active
+    )
+    return services
 
 async def get_tenant_id_from_header(request: Request) -> Optional[UUID]:
     """Получает tenant_id из заголовка X-Tenant-ID"""

@@ -157,6 +157,23 @@ export const getMasters = async (tenantId?: string) => {
   }
 }
 
+// ====================== PUBLIC MASTERS API (for barbershop pages) ======================
+export const getPublicMasters = async () => {
+  try {
+    const response = await api.get('/api/masters/public')
+    
+    // Нормализуем каждого мастера в ответе
+    if (Array.isArray(response.data)) {
+      return response.data.map(master => normalizeMasterData(master));
+    }
+    
+    return response.data
+  } catch (error) {
+    console.error('Error getting public masters:', error)
+    throw error
+  }
+}
+
 
 export const getMaster = async (masterId: string, tenantId?: string) => {
   try {
@@ -556,6 +573,17 @@ export const getServices = async (tenantId?: string) => {
     return response.data
   } catch (error) {
     console.error('Error getting services:', error)
+    throw error
+  }
+}
+
+// ====================== PUBLIC SERVICES API (for barbershop pages) ======================
+export const getPublicServices = async () => {
+  try {
+    const response = await api.get('/api/services/public')
+    return response.data
+  } catch (error) {
+    console.error('Error getting public services:', error)
     throw error
   }
 }

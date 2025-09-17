@@ -1,12 +1,13 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { getMasters, getImageUrl } from '@/lib/api'
+import { getMasters, getPublicMasters, getImageUrl } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 
 interface MastersListProps {
-  tenantId: string
+  tenantId?: string
+  isPublic?: boolean
 }
 
 // ИСПРАВЛЕНИЕ: Функция для нормализации данных специализации
@@ -24,10 +25,10 @@ const normalizeSpecialization = (spec: any): string[] => {
   return [];
 }
 
-export function MastersList({ tenantId }: MastersListProps) {
+export function MastersList({ tenantId, isPublic = false }: MastersListProps) {
   const { data: masters, isLoading } = useQuery({
-    queryKey: ['masters', tenantId],
-    queryFn: () => getMasters(tenantId),
+    queryKey: isPublic ? ['public-masters'] : ['masters', tenantId],
+    queryFn: () => isPublic ? getPublicMasters() : getMasters(tenantId),
   })
 
   if (isLoading) {

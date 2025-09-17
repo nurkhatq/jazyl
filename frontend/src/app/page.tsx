@@ -17,14 +17,19 @@ export default function Home() {
     const loadTenant = async () => {
       try {
         const subdomain = window.location.hostname.split('.')[0]
+        console.log('🔍 [PAGE] Loading tenant for subdomain:', subdomain)
+        console.log('🔍 [PAGE] Current URL:', window.location.href)
         
         if (subdomain === 'jazyl' || subdomain === 'www') {
           // Main platform page
+          console.log('🔍 [PAGE] Redirecting to platform')
           router.push('/platform')
           return
         }
 
+        console.log('🔍 [PAGE] Calling getTenantBySubdomain with:', subdomain)
         const tenantData = await getTenantBySubdomain(subdomain)
+        console.log('🔍 [PAGE] Tenant data received:', tenantData)
         setTenant(tenantData)
         
         // Apply tenant branding
@@ -35,7 +40,12 @@ export default function Home() {
           document.documentElement.style.setProperty('--secondary', tenantData.secondary_color)
         }
       } catch (error) {
-        console.error('Failed to load tenant:', error)
+        console.error('❌ [PAGE] Failed to load tenant:', error)
+        console.error('❌ [PAGE] Error details:', {
+          message: error.message,
+          status: error.response?.status,
+          url: error.config?.url
+        })
         router.push('/404')
       } finally {
         setLoading(false)
@@ -127,7 +137,7 @@ export default function Home() {
       <section id="booking-by-master" className="py-12 bg-muted/30">
         <div className="container mx-auto px-4">
           <h3 className="text-2xl font-bold mb-8 text-center">Our Masters</h3>
-          <MastersList tenantId={tenant.id} />
+          <MastersList isPublic={true} />
         </div>
       </section>
 
@@ -135,7 +145,7 @@ export default function Home() {
       <section className="py-12">
         <div className="container mx-auto px-4">
           <h3 className="text-2xl font-bold mb-8 text-center">Our Services</h3>
-          <ServicesList tenantId={tenant.id} />
+          <ServicesList isPublic={true} />
         </div>
       </section>
 

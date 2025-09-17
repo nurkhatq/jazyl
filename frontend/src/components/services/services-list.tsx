@@ -1,19 +1,20 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { getServices } from '@/lib/api'
+import { getServices, getPublicServices } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Clock, DollarSign } from 'lucide-react'
 
 interface ServicesListProps {
-  tenantId: string
+  tenantId?: string
+  isPublic?: boolean
 }
 
-export function ServicesList({ tenantId }: ServicesListProps) {
+export function ServicesList({ tenantId, isPublic = false }: ServicesListProps) {
   const { data: services, isLoading } = useQuery({
-    queryKey: ['services', tenantId],
-    queryFn: () => getServices(tenantId),
+    queryKey: isPublic ? ['public-services'] : ['services', tenantId],
+    queryFn: () => isPublic ? getPublicServices() : getServices(tenantId),
   })
 
   if (isLoading) {
