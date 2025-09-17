@@ -125,14 +125,16 @@ export default function BarbershopPage() {
 
       {/* Booking Section */}
       {showBooking && (
-        <section className="py-12 bg-white border-b">
+        <section className="py-12 bg-white border-b min-h-screen">
           <div className="container mx-auto px-4">
-            <BookingFlow 
-              tenantId={tenant.id}
-              preselectedMaster={selectedMaster}
-              preselectedService={selectedService}
-              isPublic={true}
-            />
+            <div className="max-w-4xl mx-auto">
+              <BookingFlow 
+                tenantId={tenant.id}
+                preselectedMaster={selectedMaster}
+                preselectedService={selectedService}
+                isPublic={true}
+              />
+            </div>
           </div>
         </section>
       )}
@@ -149,9 +151,13 @@ export default function BarbershopPage() {
                   {master.photo_url && (
                     <div className="h-48 overflow-hidden">
                       <img 
-                        src={getImageUrl(master.photo_url) || ''} 
+                        src={getImageUrl(master.photo_url) || master.photo_url} 
                         alt={master.display_name}
                         className="w-full h-full object-cover"
+                        onError={(e) => {
+                          // Hide image and show placeholder if it fails to load
+                          e.currentTarget.style.display = 'none'
+                        }}
                       />
                     </div>
                   )}
@@ -174,16 +180,27 @@ export default function BarbershopPage() {
                     {master.description && (
                       <p className="text-gray-600 mb-4">{master.description}</p>
                     )}
-                    <Button 
-                      className="w-full"
-                      onClick={() => {
-                        setSelectedMaster(master)
-                        setShowBooking(true)
-                        window.scrollTo({ top: 0, behavior: 'smooth' })
-                      }}
-                    >
-                      Book with {master.display_name.split(' ')[0]}
-                    </Button>
+                    <div className="space-y-2">
+                      <Button 
+                        className="w-full"
+                        onClick={() => {
+                          setSelectedMaster(master)
+                          setShowBooking(true)
+                          window.scrollTo({ top: 0, behavior: 'smooth' })
+                        }}
+                      >
+                        Book with {master.display_name.split(' ')[0]}
+                      </Button>
+                      <Button 
+                        variant="outline"
+                        className="w-full"
+                        onClick={() => {
+                          window.open(`/master/${master.id}`, '_blank')
+                        }}
+                      >
+                        View Profile
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
               ))}

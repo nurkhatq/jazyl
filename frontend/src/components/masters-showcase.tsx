@@ -6,6 +6,7 @@ import { Star, Award, Clock, User } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { getImageUrl } from '@/lib/api'
 
 interface MastersShowcaseProps {
   masters: any[]
@@ -38,15 +39,19 @@ export default function MastersShowcase({ masters, onSelectMaster }: MastersShow
             <div className="relative h-64 bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800">
               {master.photo_url ? (
                 <img
-                  src={master.photo_url}
+                  src={getImageUrl(master.photo_url) || master.photo_url}
                   alt={master.display_name}
                   className="w-full h-full object-cover"
+                  onError={(e) => {
+                    // Fallback to placeholder if image fails to load
+                    e.currentTarget.style.display = 'none'
+                    e.currentTarget.nextElementSibling?.classList.remove('hidden')
+                  }}
                 />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <User className="h-20 w-20 text-gray-400" />
-                </div>
-              )}
+              ) : null}
+              <div className={`w-full h-full flex items-center justify-center ${master.photo_url ? 'hidden' : ''}`}>
+                <User className="h-20 w-20 text-gray-400" />
+              </div>
               
               {/* Rating Badge */}
               {master.rating > 0 && (
@@ -100,14 +105,25 @@ export default function MastersShowcase({ masters, onSelectMaster }: MastersShow
                 </div>
               </div>
 
-              {/* Book Button */}
-              <Button 
-                className="w-full"
-                onClick={() => onSelectMaster(master)}
-                style={{ backgroundColor: 'var(--primary)', color: 'white' }}
-              >
-                Book Now
-              </Button>
+              {/* Action Buttons */}
+              <div className="space-y-2">
+                <Button 
+                  className="w-full"
+                  onClick={() => onSelectMaster(master)}
+                  style={{ backgroundColor: 'var(--primary)', color: 'white' }}
+                >
+                  Book Now
+                </Button>
+                <Button 
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => {
+                    window.open(`/master/${master.id}`, '_blank')
+                  }}
+                >
+                  View Profile
+                </Button>
+              </div>
             </div>
           </Card>
         </motion.div>

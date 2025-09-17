@@ -34,12 +34,21 @@ async def get_tenant_id_from_header(request: Request) -> Optional[UUID]:
 # --- Email Verification for Booking ---
 @router.post("/verify-email")
 async def verify_booking_email(
-    email: str,
     request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """Send email verification for booking"""
+    # Get email from request body
+    body = await request.json()
+    email = body.get("email")
+    
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Email is required"
+        )
+    
     tenant_id = await get_tenant_id_from_header(request)
     
     if not tenant_id:
