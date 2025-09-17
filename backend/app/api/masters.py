@@ -633,6 +633,7 @@ async def request_permission(
         permission_service = PermissionRequestService(db)
         request_obj = await permission_service.create_request(
             master.id,
+            master.tenant_id,
             perm_type,
             reason,
             additional_info
@@ -811,6 +812,51 @@ async def get_masters_list(
     
     return masters_data
 
+
+# ---------------------- Photo upload with master ID ----------------------
+@router.post("/{master_id}/upload-photo")
+async def upload_master_photo(
+    master_id: UUID,
+    photo: UploadFile = File(...),
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_db)
+):
+    """Загрузить фото мастера по ID (только для админов/владельцев)"""
+    try:
+        result = await db.execute(
+            select(Master).where(Master.id == master_id)
+        )
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            raise HTTPException(status_code=404, detail="Master not found")
+        
+        # Проверяем тип файла
+        if not photo.content_type or not photo.content_type.startswith('image/'):
+            raise HTTPException(
+                status_code=400,
+                detail="Only image files are allowed"
+            )
+        
+        # Загружаем файл
+        upload_service = FileUploadService()
+        photo_url = await upload_service.upload_master_photo(photo, master.id)
+        
+        # Обновляем профиль
+        master.photo_url = photo_url
+        master.updated_at = datetime.utcnow()
+        await db.commit()
+        
+        return {"photo_url": photo_url, "message": "Photo uploaded successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error uploading master photo: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to upload photo"
+        )
 
 # ⭐ ВАЖНО: Параметрический роут /{master_id} должен быть В САМОМ КОНЦЕ!
 @router.get("/{master_id}", response_model=MasterResponse)
