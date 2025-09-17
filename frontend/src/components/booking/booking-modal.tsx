@@ -145,10 +145,10 @@ export default function BookingModal({
       
       // In production, the code won't be returned
       // For demo, we'll show it in a toast
-      if (response.data.token) {
+      if (response.data.code) {
         toast({
           title: 'Verification Code (Demo)',
-          description: `Your code is: ${response.data.token}`,
+          description: `Your code is: ${response.data.code}`,
           duration: 10000
         })
       }
@@ -710,8 +710,9 @@ export default function BookingModal({
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl z-50 w-full max-w-lg max-h-[90vh] overflow-hidden"
+            className="fixed inset-0 flex items-center justify-center p-4 z-50"
           >
+            <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden">
             {/* Header */}
             <div className="flex items-center justify-between p-6 border-b">
               <div className="flex items-center space-x-2">
@@ -740,6 +741,7 @@ export default function BookingModal({
               <AnimatePresence mode="wait">
                 {renderStep()}
               </AnimatePresence>
+            </div>
             </div>
           </motion.div>
         </>

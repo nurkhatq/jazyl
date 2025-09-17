@@ -75,8 +75,9 @@ async def verify_booking_email(
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
     
-    # Send verification email
-    verification_link = f"https://{tenant.subdomain}.jazyl.tech/verify-booking-email/{verification_token}"
+    # Send verification email with code
+    # For demo, we'll use a simple 6-digit code
+    verification_code = verification_token[:6].upper()
     
     # Store token in session or Redis with expiry
     # For demo, we'll return the token
@@ -85,7 +86,7 @@ async def verify_booking_email(
     email_sent = await email_service.send_booking_verification_email(
         to_email=email,
         user_name=email.split('@')[0],  # Use email prefix as name
-        verification_link=verification_link,
+        verification_code=verification_code,
         barbershop_name=tenant.name
     )
     
@@ -97,6 +98,7 @@ async def verify_booking_email(
     
     return {
         "message": "Verification email sent",
+        "code": verification_code,  # For demo purposes
         "token": verification_token  # Remove in production
     }
 

@@ -284,10 +284,10 @@ class EmailService:
         self,
         to_email: str,
         user_name: str,
-        verification_link: str,
+        verification_code: str,
         barbershop_name: str
     ) -> bool:
-        """Send booking verification email"""
+        """Send booking verification email with code"""
         html_content = f"""
         <!DOCTYPE html>
         <html>
@@ -319,17 +319,26 @@ class EmailService:
                     font-weight: bold;
                     color: #000;
                 }}
-                .button {{
-                    display: inline-block;
-                    padding: 12px 30px;
-                    background-color: #000;
-                    color: white;
-                    text-decoration: none;
-                    border-radius: 5px;
+                .code-box {{
+                    background-color: #f8f9fa;
+                    border: 2px solid #000;
+                    border-radius: 8px;
+                    padding: 20px;
                     margin: 20px 0;
+                    text-align: center;
                 }}
-                .button:hover {{
-                    background-color: #333;
+                .verification-code {{
+                    font-size: 32px;
+                    font-weight: bold;
+                    font-family: 'Courier New', monospace;
+                    letter-spacing: 4px;
+                    color: #000;
+                    background-color: #fff;
+                    padding: 15px 25px;
+                    border-radius: 6px;
+                    border: 1px solid #ddd;
+                    display: inline-block;
+                    margin: 10px 0;
                 }}
                 .info-box {{
                     background-color: #f9f9f9;
@@ -357,20 +366,19 @@ class EmailService:
                 
                 <p>Hello {user_name},</p>
                 
-                <p>Thank you for choosing <strong>{barbershop_name}</strong>! To complete your booking, please verify your email address.</p>
+                <p>Thank you for choosing <strong>{barbershop_name}</strong>! To complete your booking, please verify your email address using the code below.</p>
+                
+                <div class="code-box">
+                    <p style="margin: 0 0 10px 0; font-weight: bold;">Your verification code is:</p>
+                    <div class="verification-code">{verification_code}</div>
+                    <p style="margin: 10px 0 0 0; font-size: 14px; color: #666;">Enter this code in the booking form to continue</p>
+                </div>
                 
                 <div class="info-box">
-                    <p><strong>Next Step:</strong> Click the button below to verify your email and complete your booking.</p>
+                    <p><strong>Next Step:</strong> Return to the booking page and enter the verification code above to complete your booking.</p>
                 </div>
                 
-                <div style="text-align: center;">
-                    <a href="{verification_link}" class="button">Verify Email & Complete Booking</a>
-                </div>
-                
-                <p>If the button doesn't work, you can copy and paste this link into your browser:</p>
-                <p style="word-break: break-all; color: #666; font-size: 12px;">{verification_link}</p>
-                
-                <p>This verification link will expire in 24 hours for security reasons.</p>
+                <p>This verification code will expire in 10 minutes for security reasons.</p>
                 
                 <div class="footer">
                     <p>This email was sent from Jazyl - Barbershop Management Platform</p>
@@ -386,6 +394,6 @@ class EmailService:
         
         return await self.send_email(
             to_email=to_email,
-            subject=f"Verify Your Email - {barbershop_name}",
+            subject=f"Your Verification Code - {barbershop_name}",
             html_content=html_content
         )
