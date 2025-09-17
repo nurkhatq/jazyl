@@ -15,6 +15,7 @@ from app.models.booking import Booking, BookingStatus
 from app.models.client import Client
 from app.models.user import User, UserRole
 from app.models.master import Master
+from app.models.tenant import Tenant
 from app.utils.security import require_role
 from app.models.service import Service
 
@@ -284,13 +285,27 @@ async def create_booking(
     if current_user:
         tenant_id = current_user.tenant_id
     else:
-        tenant_id = await get_tenant_id_from_header(request)
-    
-    if not tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tenant ID is required"
+        # Get tenant_id from subdomain header
+        subdomain = request.headers.get("X-Tenant-Subdomain")
+        if not subdomain:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Subdomain is required"
+            )
+        
+        # Get tenant by subdomain
+        tenant_result = await db.execute(
+            select(Tenant).where(Tenant.subdomain == subdomain)
         )
+        tenant = tenant_result.scalar_one_or_none()
+        
+        if not tenant:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Tenant not found"
+            )
+        
+        tenant_id = tenant.id
     
     # Check availability
     if not await service.check_availability(
@@ -503,13 +518,27 @@ async def get_public_bookings(
     if current_user:
         tenant_id = current_user.tenant_id
     else:
-        tenant_id = await get_tenant_id_from_header(request)
-    
-    if not tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tenant ID is required"
+        # Get tenant_id from subdomain header
+        subdomain = request.headers.get("X-Tenant-Subdomain")
+        if not subdomain:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Subdomain is required"
+            )
+        
+        # Get tenant by subdomain
+        tenant_result = await db.execute(
+            select(Tenant).where(Tenant.subdomain == subdomain)
         )
+        tenant = tenant_result.scalar_one_or_none()
+        
+        if not tenant:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Tenant not found"
+            )
+        
+        tenant_id = tenant.id
     
     bookings = await service.get_bookings(
         tenant_id=tenant_id,
