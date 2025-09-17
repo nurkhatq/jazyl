@@ -14,9 +14,7 @@ branch_labels = None
 depends_on = None
 
 def upgrade() -> None:
-    print("��� Добавление полей разрешений в таблицу masters...")
-    
-    # Добавляем поля разрешений
+    # Add permission fields to masters table
     op.add_column('masters', sa.Column('can_edit_profile', sa.Boolean(), nullable=False, server_default='true'))
     op.add_column('masters', sa.Column('can_edit_schedule', sa.Boolean(), nullable=False, server_default='false'))
     op.add_column('masters', sa.Column('can_edit_services', sa.Boolean(), nullable=False, server_default='false'))
@@ -24,8 +22,6 @@ def upgrade() -> None:
     op.add_column('masters', sa.Column('can_view_analytics', sa.Boolean(), nullable=False, server_default='true'))
     op.add_column('masters', sa.Column('can_upload_photos', sa.Boolean(), nullable=False, server_default='true'))
     op.add_column('masters', sa.Column('experience_years', sa.Integer(), nullable=False, server_default='0'))
-    
-    print("✅ Поля разрешений добавлены")
 
 def downgrade() -> None:
     op.drop_column('masters', 'experience_years')

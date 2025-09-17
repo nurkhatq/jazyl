@@ -15,15 +15,11 @@ branch_labels = None
 depends_on = None
 
 def upgrade() -> None:
-    print("��� Создание системы запросов разрешений...")
-    
-    # Создаем enum для статусов
+    # Create enums
     op.execute("CREATE TYPE permissionrequeststatus AS ENUM ('pending', 'approved', 'rejected')")
-    
-    # Создаем enum для типов разрешений
     op.execute("CREATE TYPE permissionrequesttype AS ENUM ('edit_schedule', 'edit_services', 'edit_profile', 'upload_photos', 'manage_bookings', 'view_analytics')")
     
-    # Создаем таблицу
+    # Create permission_requests table
     op.create_table('permission_requests',
         sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column('master_id', postgresql.UUID(as_uuid=True), nullable=False),
@@ -50,14 +46,12 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['reviewed_by'], ['users.id'], ondelete='SET NULL')
     )
     
-    # Индексы
+    # Create indexes
     op.create_index('ix_permission_requests_master_id', 'permission_requests', ['master_id'])
     op.create_index('ix_permission_requests_tenant_id', 'permission_requests', ['tenant_id'])
     op.create_index('ix_permission_requests_status', 'permission_requests', ['status'])
-    
-    print("✅ Система запросов разрешений создана")
 
 def downgrade() -> None:
     op.drop_table('permission_requests')
-    op.execute('DROP TYPE permissionrequesttype')
-    op.execute('DROP TYPE permissionrequeststatus')
+    op.execute('DROP TYPE IF EXISTS permissionrequesttype')
+    op.execute('DROP TYPE IF EXISTS permissionrequeststatus')
