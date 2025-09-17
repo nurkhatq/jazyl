@@ -41,11 +41,7 @@ export default function Home() {
         }
       } catch (error) {
         console.error('❌ [PAGE] Failed to load tenant:', error)
-        console.error('❌ [PAGE] Error details:', {
-          message: error.message,
-          status: error.response?.status,
-          url: error.config?.url
-        })
+        console.error('❌ [PAGE] Error details:')
         router.push('/404')
       } finally {
         setLoading(false)
