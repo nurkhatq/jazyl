@@ -111,6 +111,147 @@ async def get_my_profile(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get master profile"
         )
+@router.get("/permission-requests")
+async def get_permission_requests(
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_db)
+):
+    """Получить запросы разрешений (для менеджеров)"""
+    permission_service = PermissionRequestService(db)
+    requests = await permission_service.get_requests_for_tenant(current_user.tenant_id)
+    
+    return [
+        {
+            "id": str(req.id),
+            "master_id": str(req.master_id),
+            "permission_type": req.permission_type.value,
+            "reason": req.reason,
+            "additional_info": req.additional_info,
+            "status": req.status.value,
+            "created_at": req.created_at.isoformat(),
+            "reviewed_at": req.reviewed_at.isoformat() if req.reviewed_at else None,
+            "review_note": req.review_note
+        }
+        for req in requests
+    ]
+
+@router.get("/permission-requests/stats")
+async def get_permission_requests_stats(
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_db)
+):
+    """Получить статистику по запросам разрешений"""
+    try:
+        from app.models.permission_request import PermissionRequest, PermissionRequestStatus
+        
+        # Считаем запросы по статусам для данного тенанта
+        total_result = await db.execute(
+            select(func.count()).select_from(PermissionRequest)
+            .where(PermissionRequest.tenant_id == current_user.tenant_id)
+        )
+        total = total_result.scalar() or 0
+        
+        pending_result = await db.execute(
+            select(func.count()).select_from(PermissionRequest)
+            .where(
+                and_(
+                    PermissionRequest.tenant_id == current_user.tenant_id,
+                    PermissionRequest.status == PermissionRequestStatus.PENDING
+                )
+            )
+        )
+        pending = pending_result.scalar() or 0
+        
+        approved_result = await db.execute(
+            select(func.count()).select_from(PermissionRequest)
+            .where(
+                and_(
+                    PermissionRequest.tenant_id == current_user.tenant_id,
+                    PermissionRequest.status == PermissionRequestStatus.APPROVED
+                )
+            )
+        )
+        approved = approved_result.scalar() or 0
+        
+        rejected_result = await db.execute(
+            select(func.count()).select_from(PermissionRequest)
+            .where(
+                and_(
+                    PermissionRequest.tenant_id == current_user.tenant_id,
+                    PermissionRequest.status == PermissionRequestStatus.REJECTED
+                )
+            )
+        )
+        rejected = rejected_result.scalar() or 0
+        
+        return {
+            "total": total,
+            "pending": pending,
+            "approved": approved,
+            "rejected": rejected
+        }
+        
+    except Exception as e:
+        print(f"Error in get_permission_requests_stats: {e}")
+        return {
+            "total": 0,
+            "pending": 0,
+            "approved": 0,
+            "rejected": 0
+        }
+
+@router.put("/bulk-permissions")
+async def bulk_update_master_permissions(
+    updates_data: dict,
+    current_user: User = Depends(require_role([UserRole.OWNER])),
+    db: AsyncSession = Depends(get_db)
+):
+    """Массовое обновление прав мастеров"""
+    try:
+        updates = updates_data.get("updates", [])
+        updated_count = 0
+        
+        for update in updates:
+            master_id = update.get("masterId")
+            permissions = update.get("permissions", {})
+            
+            if not master_id:
+                continue
+                
+            # Проверяем что мастер существует и принадлежит тому же тенанту
+            result = await db.execute(
+                select(Master).where(
+                    and_(
+                        Master.id == master_id,
+                        Master.tenant_id == current_user.tenant_id
+                    )
+                )
+            )
+            master = result.scalar_one_or_none()
+            
+            if master:
+                # Обновляем только переданные права
+                for key, value in permissions.items():
+                    if hasattr(master, key):
+                        setattr(master, key, value)
+                
+                master.updated_at = datetime.utcnow()
+                updated_count += 1
+        
+        await db.commit()
+        
+        return {
+            "message": f"Updated permissions for {updated_count} masters",
+            "updated_count": updated_count
+        }
+        
+    except Exception as e:
+        print(f"Error in bulk_update_master_permissions: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update master permissions"
+        )
+
 
 @router.put("/my-profile", response_model=MasterResponse)
 async def update_my_profile(
@@ -802,30 +943,6 @@ async def delete_master(
     
     return {"message": "Master deleted successfully"}
 
-@router.get("/permission-requests")
-async def get_permission_requests(
-    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
-    db: AsyncSession = Depends(get_db)
-):
-    """Получить запросы разрешений (для менеджеров)"""
-    permission_service = PermissionRequestService(db)
-    requests = await permission_service.get_requests_for_tenant(current_user.tenant_id)
-    
-    return [
-        {
-            "id": str(req.id),
-            "master_id": str(req.master_id),
-            "permission_type": req.permission_type.value,
-            "reason": req.reason,
-            "additional_info": req.additional_info,
-            "status": req.status.value,
-            "created_at": req.created_at.isoformat(),
-            "reviewed_at": req.reviewed_at.isoformat() if req.reviewed_at else None,
-            "review_note": req.review_note
-        }
-        for req in requests
-    ]
-
 @router.put("/permission-requests/{request_id}/approve")
 async def approve_permission_request(
     request_id: UUID,
@@ -906,121 +1023,3 @@ async def update_master_permissions(
     await db.refresh(master)
     
     return master
-
-
-@router.get("/permission-requests/stats")
-async def get_permission_requests_stats(
-    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
-    db: AsyncSession = Depends(get_db)
-):
-    """Получить статистику по запросам разрешений"""
-    try:
-        from app.models.permission_request import PermissionRequest, PermissionRequestStatus
-        
-        # Считаем запросы по статусам для данного тенанта
-        total_result = await db.execute(
-            select(func.count()).select_from(PermissionRequest)
-            .where(PermissionRequest.tenant_id == current_user.tenant_id)
-        )
-        total = total_result.scalar() or 0
-        
-        pending_result = await db.execute(
-            select(func.count()).select_from(PermissionRequest)
-            .where(
-                and_(
-                    PermissionRequest.tenant_id == current_user.tenant_id,
-                    PermissionRequest.status == PermissionRequestStatus.PENDING
-                )
-            )
-        )
-        pending = pending_result.scalar() or 0
-        
-        approved_result = await db.execute(
-            select(func.count()).select_from(PermissionRequest)
-            .where(
-                and_(
-                    PermissionRequest.tenant_id == current_user.tenant_id,
-                    PermissionRequest.status == PermissionRequestStatus.APPROVED
-                )
-            )
-        )
-        approved = approved_result.scalar() or 0
-        
-        rejected_result = await db.execute(
-            select(func.count()).select_from(PermissionRequest)
-            .where(
-                and_(
-                    PermissionRequest.tenant_id == current_user.tenant_id,
-                    PermissionRequest.status == PermissionRequestStatus.REJECTED
-                )
-            )
-        )
-        rejected = rejected_result.scalar() or 0
-        
-        return {
-            "total": total,
-            "pending": pending,
-            "approved": approved,
-            "rejected": rejected
-        }
-        
-    except Exception as e:
-        print(f"Error in get_permission_requests_stats: {e}")
-        return {
-            "total": 0,
-            "pending": 0,
-            "approved": 0,
-            "rejected": 0
-        }
-
-@router.put("/bulk-permissions")
-async def bulk_update_master_permissions(
-    updates_data: dict,
-    current_user: User = Depends(require_role([UserRole.OWNER])),
-    db: AsyncSession = Depends(get_db)
-):
-    """Массовое обновление прав мастеров"""
-    try:
-        updates = updates_data.get("updates", [])
-        updated_count = 0
-        
-        for update in updates:
-            master_id = update.get("masterId")
-            permissions = update.get("permissions", {})
-            
-            if not master_id:
-                continue
-                
-            # Проверяем что мастер существует и принадлежит тому же тенанту
-            result = await db.execute(
-                select(Master).where(
-                    and_(
-                        Master.id == master_id,
-                        Master.tenant_id == current_user.tenant_id
-                    )
-                )
-            )
-            master = result.scalar_one_or_none()
-            
-            if master:
-                # Обновляем только переданные права
-                for key, value in permissions.items():
-                    if hasattr(master, key):
-                        setattr(master, key, value)
-                
-                master.updated_at = datetime.utcnow()
-                updated_count += 1
-        
-        await db.commit()
-        
-        return {
-            "message": f"Updated permissions for {updated_count} masters",
-            "updated_count": updated_count
-        }
-        
-    except Exception as e:
-        print(f"Error in bulk_update_master_permissions: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update master permissions"
-        )

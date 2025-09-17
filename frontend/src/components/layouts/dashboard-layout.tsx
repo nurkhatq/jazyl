@@ -52,11 +52,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
   // Добавляем специальные пункты для владельца
   if (user?.role === 'owner') {
-    navigation.splice(-1, 0, {
-      name: 'Управление мастерами',
-      href: '/dashboard/masters-management',
-      icon: Users
-    })
+    // Вставляем после Masters, но перед Settings
     navigation.splice(-1, 0, {
       name: 'Запросы разрешений',
       href: '/dashboard/permission-requests',

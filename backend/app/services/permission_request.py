@@ -58,27 +58,17 @@ class PermissionRequestService:
         
         return request
     
-    async def get_requests_for_tenant(
-        self,
-        tenant_id: UUID,
-        status: Optional[PermissionRequestStatus] = None
-    ) -> List[PermissionRequest]:
-        """Получить запросы для тенанта"""
-        query = select(PermissionRequest).where(PermissionRequest.tenant_id == tenant_id)
-        
-        if status:
-            query = query.where(PermissionRequest.status == status)
-        
-        query = query.order_by(desc(PermissionRequest.created_at))
-        
-        result = await self.db.execute(query)
+    async def get_requests_for_tenant(self, tenant_id: UUID) -> List[PermissionRequest]:
+        """Получить все запросы для тенанта"""
+        result = await self.db.execute(
+            select(PermissionRequest)
+            .where(PermissionRequest.tenant_id == tenant_id)
+            .order_by(desc(PermissionRequest.created_at))
+        )
         return result.scalars().all()
     
-    async def get_requests_for_master(
-        self,
-        master_id: UUID
-    ) -> List[PermissionRequest]:
-        """Получить запросы мастера"""
+    async def get_requests_for_master(self, master_id: UUID) -> List[PermissionRequest]:
+        """Получить все запросы для мастера"""
         result = await self.db.execute(
             select(PermissionRequest)
             .where(PermissionRequest.master_id == master_id)
