@@ -339,13 +339,13 @@ export const getMyAnalytics = async () => {
 /**
  * Запросить разрешение у менеджера
  */
-export const requestPermission = async (permissionData: {
-  permission_type: string;
-  reason: string;
-  additional_info?: string;
-}) => {
+export const requestPermission = async (permissionType: string, reason: string, additionalInfo?: string) => {
   try {
-    const response = await api.post('/api/masters/request-permission', permissionData)
+    const response = await api.post('/api/masters/request-permission', {
+      permission_type: permissionType,
+      reason: reason,
+      additional_info: additionalInfo || ''
+    })
     return response.data
   } catch (error) {
     console.error('Error requesting permission:', error)
@@ -361,7 +361,7 @@ export const getMyPermissionRequests = async () => {
     const response = await api.get('/api/masters/my-permission-requests')
     return response.data
   } catch (error) {
-    console.error('Error getting permission requests:', error)
+    console.error('Error getting my permission requests:', error)
     return { requests: [] }
   }
 }
@@ -376,6 +376,69 @@ export const getMySchedule = async () => {
   } catch (error) {
     console.error('Error getting master schedule:', error)
     return { schedule: [] }
+  }
+}
+
+
+export const getMastersWithPermissions = async (tenantId?: string) => {
+  try {
+    const config: any = {}
+    
+    if (tenantId) {
+      const tenantIdString = typeof tenantId === 'string' ? tenantId : String(tenantId)
+      config.headers = { 'X-Tenant-ID': tenantIdString }
+    }
+    
+    const response = await api.get('/api/masters', config)
+    return response.data
+  } catch (error) {
+    console.error('Error getting masters with permissions:', error)
+    throw error
+  }
+}
+
+export const toggleMasterStatus = async (masterId: string, isActive: boolean) => {
+  try {
+    const response = await api.put(`/api/masters/${masterId}`, {
+      is_active: isActive
+    })
+    return response.data
+  } catch (error) {
+    console.error('Error toggling master status:', error)
+    throw error
+  }
+}
+
+export const getPermissionRequestsStats = async () => {
+  try {
+    const response = await api.get('/api/masters/permission-requests/stats')
+    return response.data
+  } catch (error) {
+    console.error('Error getting permission requests stats:', error)
+    return {
+      total: 0,
+      pending: 0,
+      approved: 0,
+      rejected: 0
+    }
+  }
+}
+
+/**
+ * Массовое обновление прав мастеров
+ */
+export const bulkUpdateMasterPermissions = async (updates: Array<{
+  masterId: string;
+  permissions: any;
+}>) => {
+  try {
+    const response = await api.put('/api/masters/bulk-permissions', {
+      updates: updates
+    })
+    return response.data
+  } catch (error) {
+    console.error('Error bulk updating master permissions:', error)
+    throw error
   }
 }
 

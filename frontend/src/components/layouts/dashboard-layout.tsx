@@ -4,7 +4,10 @@ import { ReactNode } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { useAuthStore } from '@/lib/store'
+import { useQuery } from '@tanstack/react-query'
+import { getPermissionRequestsStats } from '@/lib/api'
 import {
   LayoutDashboard,
   Calendar,
@@ -14,7 +17,9 @@ import {
   Settings,
   LogOut,
   Menu,
-  X
+  X,
+  Shield,
+  AlertTriangle
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -28,6 +33,14 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { user, clearAuth } = useAuthStore()
 
+  // Получаем статистику запросов разрешений для владельца
+  const { data: requestsStats } = useQuery({
+    queryKey: ['permission-requests-stats'],
+    queryFn: getPermissionRequestsStats,
+    enabled: !!user && user.role === 'owner',
+    refetchInterval: 30000 // Обновляем каждые 30 секунд
+  })
+
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     { name: 'Bookings', href: '/dashboard/bookings', icon: Calendar },
@@ -36,6 +49,20 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     { name: 'Clients', href: '/dashboard/clients', icon: UserCircle },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings },
   ]
+
+  // Добавляем специальные пункты для владельца
+  if (user?.role === 'owner') {
+    navigation.splice(-1, 0, {
+      name: 'Управление мастерами',
+      href: '/dashboard/masters-management',
+      icon: Users
+    })
+    navigation.splice(-1, 0, {
+      name: 'Запросы разрешений',
+      href: '/dashboard/permission-requests',
+      icon: Shield
+    })
+  }
 
   const handleLogout = () => {
     clearAuth()
@@ -75,11 +102,14 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         <nav className="flex-1 space-y-1 px-3 py-4">
           {navigation.map((item) => {
             const isActive = pathname === item.href
+            const isPendingRequests = item.href === '/dashboard/permission-requests'
+            const hasPendingRequests = requestsStats?.pending > 0
+            
             return (
               <Link
                 key={item.name}
                 href={item.href}
-                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors relative ${
                   isActive
                     ? 'bg-gray-100 text-gray-900'
                     : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
@@ -87,6 +117,11 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               >
                 <item.icon className="mr-3 h-5 w-5" />
                 {item.name}
+                {isPendingRequests && hasPendingRequests && (
+                  <Badge variant="destructive" className="ml-auto px-1 py-0 text-xs">
+                    {requestsStats.pending}
+                  </Badge>
+                )}
               </Link>
             )
           })}
@@ -123,6 +158,18 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           >
             <Menu className="h-5 w-5" />
           </Button>
+          
+          {/* Показываем уведомления о новых запросах */}
+          {user?.role === 'owner' && requestsStats?.pending > 0 && (
+            <div className="ml-auto">
+              <Link href="/dashboard/permission-requests">
+                <Button variant="outline" size="sm" className="relative">
+                  <AlertTriangle className="h-4 w-4 mr-1 text-yellow-600" />
+                  {requestsStats.pending} новых запросов
+                </Button>
+              </Link>
+            </div>
+          )}
         </div>
 
         {/* Page content */}

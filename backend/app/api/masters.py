@@ -615,36 +615,61 @@ async def block_my_time(
 
 # ---------------------- PUBLIC ENDPOINTS для клиентов ----------------------
 # ⭐ ВАЖНО: Эти роуты идут ПОСЛЕ специфичных роутов для мастеров!
-
-@router.get("", response_model=List[MasterResponse])
-@router.get("/", response_model=List[MasterResponse], include_in_schema=False)
-async def get_masters(
+@router.get("", response_model=List[dict])
+@router.get("/", response_model=List[dict], include_in_schema=False)
+async def get_masters_list(
     request: Request,
-    db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_db)
 ):
-    """Получить список мастеров (публичный доступ для клиентов)"""
-    try:
-        tenant_id = await get_current_tenant(request, db)
-    except HTTPException:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tenant not specified"
-        )
+    """Получить список всех мастеров для администрирования"""
+    tenant_id = current_user.tenant_id
     
-    # Для публичного доступа показываем только активных и видимых мастеров
+    # Получаем мастеров с информацией о пользователях
     result = await db.execute(
-        select(Master).where(
-            and_(
-                Master.tenant_id == tenant_id,
-                Master.is_active == True,
-                Master.is_visible == True
-            )
-        )
+        select(Master, User).join(User, Master.user_id == User.id)
+        .where(Master.tenant_id == tenant_id)
+        .order_by(Master.created_at.desc())
     )
-    masters = result.scalars().all()
     
-    return masters
+    masters_data = []
+    for master, user in result.all():
+        master_dict = {
+            "id": str(master.id),
+            "tenant_id": str(master.tenant_id),
+            "user_id": str(master.user_id),
+            "display_name": master.display_name,
+            "description": master.description,
+            "photo_url": master.photo_url,
+            "specialization": master.specialization or [],
+            "experience_years": master.experience_years or 0,
+            "rating": master.rating or 0.0,
+            "reviews_count": master.reviews_count or 0,
+            "is_active": master.is_active,
+            "is_visible": master.is_visible,
+            "can_edit_profile": master.can_edit_profile,
+            "can_edit_schedule": master.can_edit_schedule,
+            "can_edit_services": master.can_edit_services,
+            "can_manage_bookings": master.can_manage_bookings,
+            "can_view_analytics": master.can_view_analytics,
+            "can_upload_photos": master.can_upload_photos,
+            "created_at": master.created_at.isoformat() if master.created_at else None,
+            "updated_at": master.updated_at.isoformat() if master.updated_at else None,
+            # Добавляем информацию о пользователе
+            "user": {
+                "id": str(user.id),
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "phone": user.phone,
+                "is_active": user.is_active,
+                "is_verified": user.is_verified
+            }
+        }
+        masters_data.append(master_dict)
+    
+    return masters_data
+
 
 # ⭐ ВАЖНО: Параметрический роут /{master_id} должен быть В САМОМ КОНЦЕ!
 @router.get("/{master_id}", response_model=MasterResponse)
@@ -881,3 +906,121 @@ async def update_master_permissions(
     await db.refresh(master)
     
     return master
+
+
+@router.get("/permission-requests/stats")
+async def get_permission_requests_stats(
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_db)
+):
+    """Получить статистику по запросам разрешений"""
+    try:
+        from app.models.permission_request import PermissionRequest, PermissionRequestStatus
+        
+        # Считаем запросы по статусам для данного тенанта
+        total_result = await db.execute(
+            select(func.count()).select_from(PermissionRequest)
+            .where(PermissionRequest.tenant_id == current_user.tenant_id)
+        )
+        total = total_result.scalar() or 0
+        
+        pending_result = await db.execute(
+            select(func.count()).select_from(PermissionRequest)
+            .where(
+                and_(
+                    PermissionRequest.tenant_id == current_user.tenant_id,
+                    PermissionRequest.status == PermissionRequestStatus.PENDING
+                )
+            )
+        )
+        pending = pending_result.scalar() or 0
+        
+        approved_result = await db.execute(
+            select(func.count()).select_from(PermissionRequest)
+            .where(
+                and_(
+                    PermissionRequest.tenant_id == current_user.tenant_id,
+                    PermissionRequest.status == PermissionRequestStatus.APPROVED
+                )
+            )
+        )
+        approved = approved_result.scalar() or 0
+        
+        rejected_result = await db.execute(
+            select(func.count()).select_from(PermissionRequest)
+            .where(
+                and_(
+                    PermissionRequest.tenant_id == current_user.tenant_id,
+                    PermissionRequest.status == PermissionRequestStatus.REJECTED
+                )
+            )
+        )
+        rejected = rejected_result.scalar() or 0
+        
+        return {
+            "total": total,
+            "pending": pending,
+            "approved": approved,
+            "rejected": rejected
+        }
+        
+    except Exception as e:
+        print(f"Error in get_permission_requests_stats: {e}")
+        return {
+            "total": 0,
+            "pending": 0,
+            "approved": 0,
+            "rejected": 0
+        }
+
+@router.put("/bulk-permissions")
+async def bulk_update_master_permissions(
+    updates_data: dict,
+    current_user: User = Depends(require_role([UserRole.OWNER])),
+    db: AsyncSession = Depends(get_db)
+):
+    """Массовое обновление прав мастеров"""
+    try:
+        updates = updates_data.get("updates", [])
+        updated_count = 0
+        
+        for update in updates:
+            master_id = update.get("masterId")
+            permissions = update.get("permissions", {})
+            
+            if not master_id:
+                continue
+                
+            # Проверяем что мастер существует и принадлежит тому же тенанту
+            result = await db.execute(
+                select(Master).where(
+                    and_(
+                        Master.id == master_id,
+                        Master.tenant_id == current_user.tenant_id
+                    )
+                )
+            )
+            master = result.scalar_one_or_none()
+            
+            if master:
+                # Обновляем только переданные права
+                for key, value in permissions.items():
+                    if hasattr(master, key):
+                        setattr(master, key, value)
+                
+                master.updated_at = datetime.utcnow()
+                updated_count += 1
+        
+        await db.commit()
+        
+        return {
+            "message": f"Updated permissions for {updated_count} masters",
+            "updated_count": updated_count
+        }
+        
+    except Exception as e:
+        print(f"Error in bulk_update_master_permissions: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update master permissions"
+        )

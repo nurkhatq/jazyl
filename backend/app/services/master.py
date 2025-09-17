@@ -4,12 +4,14 @@ from typing import Optional, List
 from datetime import date, datetime
 from uuid import UUID
 import secrets
-
+from app.utils.email import EmailService
 from app.models.master import Master, MasterSchedule, MasterService
 from app.models.block_time import BlockTime
 from app.models.user import User, UserRole
 from app.schemas.master import MasterCreate, MasterUpdate
 from passlib.context import CryptContext
+
+from backend.app.models.tenant import Tenant
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -18,13 +20,15 @@ class MasterService:
         self.db = db
     
     async def create_master(self, tenant_id: UUID, master_data: dict) -> Master:
-        # Если предоставлены данные для создания пользователя
+        """Создать мастера с отправкой приглашения"""
         if 'user_email' in master_data:
             # Проверяем, существует ли уже пользователь с таким email
             existing_user = await self.db.execute(
                 select(User).where(User.email == master_data['user_email'])
             )
             user = existing_user.scalar_one_or_none()
+            
+            temp_password = None
             
             if not user:
                 # Создаем нового пользователя
@@ -43,8 +47,7 @@ class MasterService:
                 self.db.add(user)
                 await self.db.flush()
                 
-                # TODO: Отправить email с временным паролем и ссылкой для установки нового
-                print(f"Created user for master with temp password: {temp_password}")
+                print(f"✅ Created user for master with temp password: {temp_password}")
             
             user_id = user.id
         else:
@@ -57,29 +60,72 @@ class MasterService:
         master = Master(
             tenant_id=tenant_id,
             user_id=user_id,
-            display_name=master_data['display_name'],
+            display_name=master_data.get('display_name', ''),
             description=master_data.get('description'),
             photo_url=master_data.get('photo_url'),
-            specialization=master_data.get('specialization', [])
+            specialization=master_data.get('specialization', []),
+            experience_years=master_data.get('experience_years', 0),
+            is_active=True,
+            is_visible=True,
+            # 🔧 ИСПРАВЛЕНО: Даем базовые права по умолчанию
+            can_edit_profile=True,
+            can_edit_schedule=True,  # ✅ Разрешаем редактировать график
+            can_edit_services=False,
+            can_manage_bookings=True,
+            can_view_analytics=True,
+            can_upload_photos=True
         )
         
         self.db.add(master)
         await self.db.flush()
         
-        # Создаем расписание если предоставлено
+        # Создаем расписание, если предоставлено
         if 'schedules' in master_data:
             for schedule_data in master_data['schedules']:
                 schedule = MasterSchedule(
                     master_id=master.id,
-                    **schedule_data
+                    day_of_week=schedule_data['day_of_week'],
+                    start_time=schedule_data['start_time'],
+                    end_time=schedule_data['end_time'],
+                    is_working=schedule_data.get('is_working', True)
                 )
                 self.db.add(schedule)
         
         await self.db.commit()
         await self.db.refresh(master)
         
+        # 🚀 ИСПРАВЛЕНО: Отправляем приглашение мастеру
+        if temp_password and 'user_email' in master_data:
+            try:
+                # Получаем информацию о тенанте для названия заведения
+                tenant_result = await self.db.execute(
+                    select(Tenant).where(Tenant.id == tenant_id)
+                )
+                tenant = tenant_result.scalar_one_or_none()
+                barbershop_name = tenant.name if tenant else "Barbershop"
+                
+                # Отправляем email
+                email_service = EmailService()
+                success = await email_service.send_master_welcome_email(
+                    to_email=master_data['user_email'],
+                    master_name=user.first_name or master_data['user_email'],
+                    barbershop_name=barbershop_name,
+                    temp_password=temp_password
+                )
+                
+                if success:
+                    print(f"✅ Welcome email sent to {master_data['user_email']}")
+                else:
+                    print(f"⚠️ Failed to send welcome email to {master_data['user_email']}")
+                    
+            except Exception as e:
+                print(f"❌ Error sending welcome email: {e}")
+                # Не фейлим создание мастера из-за ошибки email
+        
         return master
-    
+
+
+
     async def get_masters(
         self,
         tenant_id: UUID,

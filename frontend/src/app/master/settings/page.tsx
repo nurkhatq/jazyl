@@ -1,874 +1,380 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Separator } from '@/components/ui/separator'
 import { useAuthStore } from '@/lib/store'
-import api from '@/lib/api'
+import { getMyProfile, updateMyProfile, getMyPermissionRequests } from '@/lib/api'
+import PermissionRequestModal from '@/components/permission-request-modal'
 import { 
   Settings, 
-  Bell, 
-  Clock, 
-  Shield, 
-  Moon, 
-  Sun,
-  Globe,
-  Smartphone,
-  Mail,
-  MessageSquare,
-  Volume2,
-  VolumeX,
-  Eye,
-  EyeOff,
+  User, 
+  Camera, 
   Calendar,
-  DollarSign,
-  User,
+  BarChart3,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Plus,
+  AlertCircle,
+  Shield,
   Save
 } from 'lucide-react'
-import { useToast } from '@/hooks/use-toast'
 
-export default function MasterSettingsPage() {
-  const user = useAuthStore((state) => state.user)
-  const { toast } = useToast()
-  const queryClient = useQueryClient()
-  
-  // Settings states
-  const [settings, setSettings] = useState({
-    // Notification preferences
-    notifications: {
-      email_bookings: true,
-      sms_bookings: false,
-      push_bookings: true,
-      email_cancellations: true,
-      sms_cancellations: true,
-      push_cancellations: true,
-      email_reminders: false,
-      sms_reminders: false,
-      push_reminders: true,
-      email_marketing: false,
-      sound_enabled: true
-    },
-    
-    // Booking preferences
-    booking: {
-      auto_accept: false,
-      advance_booking_limit: 30, // days
-      buffer_time: 15, // minutes
-      allow_same_day: true,
-      require_phone: false,
-      require_notes: false,
-      cancellation_window: 24 // hours
-    },
-    
-    // Privacy settings
-    privacy: {
-      show_phone: false,
-      show_last_name: true,
-      show_rating: true,
-      show_reviews: true,
-      allow_photos: true
-    },
-    
-    // Working hours
-    working_hours: {
-      monday: { enabled: true, start: '09:00', end: '18:00' },
-      tuesday: { enabled: true, start: '09:00', end: '18:00' },
-      wednesday: { enabled: true, start: '09:00', end: '18:00' },
-      thursday: { enabled: true, start: '09:00', end: '18:00' },
-      friday: { enabled: true, start: '09:00', end: '18:00' },
-      saturday: { enabled: true, start: '10:00', end: '16:00' },
-      sunday: { enabled: false, start: '10:00', end: '16:00' }
-    },
-    
-    // Interface preferences
-    interface: {
-      theme: 'light', // light, dark, system
-      language: 'en',
-      timezone: 'UTC',
-      date_format: 'MM/DD/YYYY',
-      time_format: '12' // 12 or 24
-    }
-  })
-
-  // Получаем текущие настройки мастера
-  const { data: masterSettings, isLoading } = useQuery({
-    queryKey: ['master-settings', user?.id],
-    queryFn: async () => {
-      try {
-        const response = await api.get('/api/masters/my-settings')
-        return response.data
-      } catch (error) {
-        // Если настроек нет, используем дефолтные
-        return settings
-      }
-    },
-    enabled: !!user?.id,
-  })
-
-  // Обновление настроек
-  const updateSettingsMutation = useMutation({
-    mutationFn: async (newSettings: any) => {
-      const response = await api.put('/api/masters/my-settings', newSettings)
-      return response.data
-    },
-    onSuccess: () => {
-      toast({
-        title: "Success",
-        description: "Settings updated successfully"
-      })
-      queryClient.invalidateQueries({ queryKey: ['master-settings'] })
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.response?.data?.detail || "Failed to update settings",
-        variant: "destructive"
-      })
-    }
-  })
-
-  const handleSaveSettings = () => {
-    updateSettingsMutation.mutate(settings)
-  }
-
-  const updateSetting = (section: string, key: string, value: any) => {
-    setSettings(prev => ({
-      ...prev,
-      [section]: {
-        ...prev[section as keyof typeof prev],
-        [key]: value
-      }
-    }))
-  }
-
-  const weekdays = [
-    { key: 'monday', label: 'Monday' },
-    { key: 'tuesday', label: 'Tuesday' },
-    { key: 'wednesday', label: 'Wednesday' },
-    { key: 'thursday', label: 'Thursday' },
-    { key: 'friday', label: 'Friday' },
-    { key: 'saturday', label: 'Saturday' },
-    { key: 'sunday', label: 'Sunday' }
-  ]
-const generateTimeSlots = (): string[] => {
-    const slots: string[] = []
-    for (let hour = 9; hour <= 21; hour++) {
-    for (let minute = 0; minute < 60; minute += 30) {
-        const time = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
-        slots.push(time)
-    }
-    }
-    return slots
+// Типизация
+interface MasterProfile {
+  display_name?: string;
+  description?: string;
+  experience_years?: number;
+  specialization?: string[];
+  can_edit_profile?: boolean;
+  can_edit_schedule?: boolean;
+  can_edit_services?: boolean;
+  can_upload_photos?: boolean;
+  can_view_analytics?: boolean;
+  can_manage_bookings?: boolean;
+  [key: string]: any;
 }
 
-  const timeSlots: string[] = generateTimeSlots()
-  for (let hour = 0; hour < 24; hour++) {
-    for (let minute = 0; minute < 60; minute += 30) {
-      const time = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
-      timeSlots.push(time)
+interface PermissionRequest {
+  id: string;
+  permission_type: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+  reviewed_at?: string;
+  review_note?: string;
+}
+
+const PERMISSION_ICONS: Record<string, any> = {
+  can_edit_profile: User,
+  can_edit_schedule: Calendar,
+  can_edit_services: Settings,
+  can_upload_photos: Camera,
+  can_view_analytics: BarChart3,
+  can_manage_bookings: CheckCircle
+}
+
+const PERMISSION_LABELS: Record<string, string> = {
+  can_edit_profile: 'Редактирование профиля',
+  can_edit_schedule: 'Редактирование графика',
+  can_edit_services: 'Управление услугами',
+  can_upload_photos: 'Загрузка фотографий',
+  can_view_analytics: 'Просмотр аналитики',
+  can_manage_bookings: 'Управление записями'
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  pending: 'bg-yellow-100 text-yellow-800',
+  approved: 'bg-green-100 text-green-800',
+  rejected: 'bg-red-100 text-red-800'
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: 'Ожидает рассмотрения',
+  approved: 'Одобрено',
+  rejected: 'Отклонено'
+}
+
+export default function MasterSettingsPage() {
+  const router = useRouter()
+  const user = useAuthStore((state) => state.user)
+  const queryClient = useQueryClient()
+  const [profileData, setProfileData] = useState({
+    display_name: '',
+    description: '',
+    experience_years: 0,
+    specialization: []
+  })
+
+  // Защита роута
+  useEffect(() => {
+    if (!user || user.role !== 'master') {
+      router.push('/unauthorized')
     }
+  }, [user, router])
+
+  // Получаем профиль мастера
+  const { data: masterProfile, isLoading } = useQuery({
+    queryKey: ['master-profile'],
+    queryFn: getMyProfile,
+    enabled: !!user && user.role === 'master'
+  })
+
+  // Получаем запросы разрешений
+  const { data: permissionRequests } = useQuery({
+    queryKey: ['my-permission-requests'],
+    queryFn: getMyPermissionRequests,
+    enabled: !!user && user.role === 'master'
+  })
+
+  // Мутация для обновления профиля
+  const updateProfileMutation = useMutation({
+    mutationFn: updateMyProfile,
+    onSuccess: () => {
+      console.log('Профиль обновлен!')
+      queryClient.invalidateQueries({ queryKey: ['master-profile'] })
+    },
+    onError: (error: any) => {
+      console.error('Ошибка при обновлении профиля:', error)
+    }
+  })
+
+  // Обновляем локальное состояние при загрузке профиля
+  useEffect(() => {
+    if (masterProfile) {
+      setProfileData({
+        display_name: masterProfile.display_name || '',
+        description: masterProfile.description || '',
+        experience_years: masterProfile.experience_years || 0,
+        specialization: masterProfile.specialization || []
+      })
+    }
+  }, [masterProfile])
+
+  const handleSaveProfile = () => {
+    updateProfileMutation.mutate(profileData)
+  }
+
+  if (!user || user.role !== 'master') {
+    return null
   }
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900" />
+      <div className="container max-w-4xl mx-auto p-6">
+        <Card>
+          <CardContent className="flex items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+          </CardContent>
+        </Card>
       </div>
     )
   }
 
+  const permissions = masterProfile ? Object.keys(PERMISSION_LABELS).filter(key => 
+    key.startsWith('can_')
+  ) : []
+
+  const grantedPermissions = permissions.filter(permission => 
+    masterProfile?.[permission] === true
+  )
+
+  const deniedPermissions = permissions.filter(permission => 
+    masterProfile?.[permission] === false
+  )
+
+  const canEditProfile = masterProfile?.can_edit_profile
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <div className="container max-w-4xl mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">Settings</h2>
+          <h1 className="text-3xl font-bold">Настройки мастера</h1>
           <p className="text-muted-foreground">
-            Manage your preferences and account settings
+            Управляйте своим профилем и разрешениями
           </p>
         </div>
-        <Button
-          onClick={handleSaveSettings}
-          disabled={updateSettingsMutation.isPending}
-        >
-          <Save className="mr-2 h-4 w-4" />
-          {updateSettingsMutation.isPending ? 'Saving...' : 'Save Changes'}
+        <Button variant="outline" onClick={() => router.push('/master')}>
+          ← Назад к дашборду
         </Button>
       </div>
 
-      <Tabs defaultValue="notifications" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="notifications">Notifications</TabsTrigger>
-          <TabsTrigger value="booking">Booking</TabsTrigger>
-          <TabsTrigger value="schedule">Schedule</TabsTrigger>
-          <TabsTrigger value="privacy">Privacy</TabsTrigger>
-          <TabsTrigger value="interface">Interface</TabsTrigger>
-        </TabsList>
-
-        {/* Notifications Tab */}
-        <TabsContent value="notifications">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Bell className="h-5 w-5" />
-                Notification Preferences
-              </CardTitle>
-              <CardDescription>
-                Choose how you want to be notified about bookings and updates
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Booking Notifications */}
-              <div>
-                <h4 className="text-sm font-medium mb-4">New Bookings</h4>
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <Mail className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <Label>Email notifications</Label>
-                        <p className="text-sm text-muted-foreground">Get emails for new bookings</p>
-                      </div>
-                    </div>
-                    <Switch
-                      checked={settings.notifications.email_bookings}
-                      onCheckedChange={(checked) => updateSetting('notifications', 'email_bookings', checked)}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <Label>SMS notifications</Label>
-                        <p className="text-sm text-muted-foreground">Get text messages for new bookings</p>
-                      </div>
-                    </div>
-                    <Switch
-                      checked={settings.notifications.sms_bookings}
-                      onCheckedChange={(checked) => updateSetting('notifications', 'sms_bookings', checked)}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <Smartphone className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <Label>Push notifications</Label>
-                        <p className="text-sm text-muted-foreground">Get push notifications in the app</p>
-                      </div>
-                    </div>
-                    <Switch
-                      checked={settings.notifications.push_bookings}
-                      onCheckedChange={(checked) => updateSetting('notifications', 'push_bookings', checked)}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* Cancellation Notifications */}
-              <div>
-                <h4 className="text-sm font-medium mb-4">Cancellations</h4>
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <Mail className="h-4 w-4 text-muted-foreground" />
-                      <Label>Email for cancellations</Label>
-                    </div>
-                    <Switch
-                      checked={settings.notifications.email_cancellations}
-                      onCheckedChange={(checked) => updateSetting('notifications', 'email_cancellations', checked)}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                      <Label>SMS for cancellations</Label>
-                    </div>
-                    <Switch
-                      checked={settings.notifications.sms_cancellations}
-                      onCheckedChange={(checked) => updateSetting('notifications', 'sms_cancellations', checked)}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* Sound Settings */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  {settings.notifications.sound_enabled ? (
-                    <Volume2 className="h-4 w-4 text-muted-foreground" />
-                  ) : (
-                    <VolumeX className="h-4 w-4 text-muted-foreground" />
-                  )}
-                  <div>
-                    <Label>Sound notifications</Label>
-                    <p className="text-sm text-muted-foreground">Play sounds for notifications</p>
-                  </div>
-                </div>
-                <Switch
-                  checked={settings.notifications.sound_enabled}
-                  onCheckedChange={(checked) => updateSetting('notifications', 'sound_enabled', checked)}
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Booking Settings Tab */}
-        <TabsContent value="booking">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Calendar className="h-5 w-5" />
-                Booking Preferences
-              </CardTitle>
-              <CardDescription>
-                Control how clients can book appointments with you
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label>Auto-accept bookings</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Automatically confirm new bookings without manual approval
-                  </p>
-                </div>
-                <Switch
-                  checked={settings.booking.auto_accept}
-                  onCheckedChange={(checked) => updateSetting('booking', 'auto_accept', checked)}
-                />
-              </div>
-
-              <Separator />
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <Label htmlFor="advance_limit">Advance booking limit (days)</Label>
-                  <Input
-                    id="advance_limit"
-                    type="number"
-                    value={settings.booking.advance_booking_limit}
-                    onChange={(e) => updateSetting('booking', 'advance_booking_limit', parseInt(e.target.value))}
-                    min="1"
-                    max="365"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    How far in advance clients can book
-                  </p>
-                </div>
-
-                <div>
-                  <Label htmlFor="buffer_time">Buffer time (minutes)</Label>
-                  <Select
-                    value={settings.booking.buffer_time.toString()}
-                    onValueChange={(value) => updateSetting('booking', 'buffer_time', parseInt(value))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="0">No buffer</SelectItem>
-                      <SelectItem value="5">5 minutes</SelectItem>
-                      <SelectItem value="10">10 minutes</SelectItem>
-                      <SelectItem value="15">15 minutes</SelectItem>
-                      <SelectItem value="30">30 minutes</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Time between appointments
-                  </p>
-                </div>
-              </div>
-
-              <div>
-                <Label htmlFor="cancellation_window">Cancellation window (hours)</Label>
-                <Input
-                  id="cancellation_window"
-                  type="number"
-                  value={settings.booking.cancellation_window}
-                  onChange={(e) => updateSetting('booking', 'cancellation_window', parseInt(e.target.value))}
-                  min="0"
-                  max="168"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Minimum time before appointment that clients can cancel
-                </p>
-              </div>
-
-              <Separator />
-
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <Label>Allow same-day bookings</Label>
-                  <Switch
-                    checked={settings.booking.allow_same_day}
-                    onCheckedChange={(checked) => updateSetting('booking', 'allow_same_day', checked)}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <Label>Require phone number</Label>
-                  <Switch
-                    checked={settings.booking.require_phone}
-                    onCheckedChange={(checked) => updateSetting('booking', 'require_phone', checked)}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <Label>Require booking notes</Label>
-                  <Switch
-                    checked={settings.booking.require_notes}
-                    onCheckedChange={(checked) => updateSetting('booking', 'require_notes', checked)}
-                  />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Schedule Tab */}
-        <TabsContent value="schedule">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Clock className="h-5 w-5" />
-                Working Hours
-              </CardTitle>
-              <CardDescription>
-                Set your default working schedule
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {weekdays.map(day => (
-                  <div key={day.key} className="flex items-center gap-4 p-4 border rounded-lg">
-                    <div className="w-20">
-                      <Switch
-                        checked={settings.working_hours[day.key as keyof typeof settings.working_hours].enabled}
-                        onCheckedChange={(checked) => {
-                          setSettings(prev => ({
-                            ...prev,
-                            working_hours: {
-                              ...prev.working_hours,
-                              [day.key]: {
-                                ...prev.working_hours[day.key as keyof typeof prev.working_hours],
-                                enabled: checked
-                              }
-                            }
-                          }))
-                        }}
-                      />
-                    </div>
-                    
-                    <div className="w-24 font-medium">
-                      {day.label}
-                    </div>
-
-                    {settings.working_hours[day.key as keyof typeof settings.working_hours].enabled ? (
-                      <div className="flex items-center gap-2 flex-1">
-                        <Select
-                          value={settings.working_hours[day.key as keyof typeof settings.working_hours].start}
-                          onValueChange={(value) => {
-                            setSettings(prev => ({
-                              ...prev,
-                              working_hours: {
-                                ...prev.working_hours,
-                                [day.key]: {
-                                  ...prev.working_hours[day.key as keyof typeof prev.working_hours],
-                                  start: value
-                                }
-                              }
-                            }))
-                          }}
-                        >
-                          <SelectTrigger className="w-24">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {timeSlots.slice(0, 48).map(time => (
-                              <SelectItem key={time} value={time}>{time}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-
-                        <span className="text-muted-foreground">to</span>
-
-                        <Select
-                          value={settings.working_hours[day.key as keyof typeof settings.working_hours].end}
-                          onValueChange={(value) => {
-                            setSettings(prev => ({
-                              ...prev,
-                              working_hours: {
-                                ...prev.working_hours,
-                                [day.key]: {
-                                  ...prev.working_hours[day.key as keyof typeof prev.working_hours],
-                                  end: value
-                                }
-                              }
-                            }))
-                          }}
-                        >
-                          <SelectTrigger className="w-24">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {timeSlots.slice(0, 48).map((time: string) => (
-                              <SelectItem key={time} value={time}>{time}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    ) : (
-                      <div className="flex-1 text-muted-foreground">
-                        Closed
-                      </div>
-                    )}
-                    </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Privacy Tab */}
-        <TabsContent value="privacy">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Shield className="h-5 w-5" />
-                Privacy Settings
-              </CardTitle>
-              <CardDescription>
-                Control what information is visible to clients
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  {settings.privacy.show_phone ? (
-                    <Eye className="h-4 w-4 text-muted-foreground" />
-                  ) : (
-                    <EyeOff className="h-4 w-4 text-muted-foreground" />
-                  )}
-                  <div>
-                    <Label>Show phone number</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Display your phone number on your public profile
-                    </p>
-                  </div>
-                </div>
-                <Switch
-                  checked={settings.privacy.show_phone}
-                  onCheckedChange={(checked) => updateSetting('privacy', 'show_phone', checked)}
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <User className="h-4 w-4 text-muted-foreground" />
-                  <div>
-                    <Label>Show full name</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Display your last name to clients
-                    </p>
-                  </div>
-                </div>
-                <Switch
-                  checked={settings.privacy.show_last_name}
-                  onCheckedChange={(checked) => updateSetting('privacy', 'show_last_name', checked)}
-                />
-              </div>
-
-              <Separator />
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label>Show rating and reviews</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Display your rating and client reviews
-                  </p>
-                </div>
-                <Switch
-                  checked={settings.privacy.show_rating}
-                  onCheckedChange={(checked) => updateSetting('privacy', 'show_rating', checked)}
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label>Show individual reviews</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Allow clients to see detailed reviews from others
-                  </p>
-                </div>
-                <Switch
-                  checked={settings.privacy.show_reviews}
-                  onCheckedChange={(checked) => updateSetting('privacy', 'show_reviews', checked)}
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label>Allow profile photos</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Let clients upload photos with their reviews
-                  </p>
-                </div>
-                <Switch
-                  checked={settings.privacy.allow_photos}
-                  onCheckedChange={(checked) => updateSetting('privacy', 'allow_photos', checked)}
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Interface Tab */}
-        <TabsContent value="interface">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Settings className="h-5 w-5" />
-                Interface Preferences
-              </CardTitle>
-              <CardDescription>
-                Customize your app experience
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Theme Settings */}
-              <div>
-                <Label htmlFor="theme">Theme</Label>
-                <Select
-                  value={settings.interface.theme}
-                  onValueChange={(value) => updateSetting('interface', 'theme', value)}
-                >
-                  <SelectTrigger className="w-48">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="light">
-                      <div className="flex items-center gap-2">
-                        <Sun className="h-4 w-4" />
-                        Light
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="dark">
-                      <div className="flex items-center gap-2">
-                        <Moon className="h-4 w-4" />
-                        Dark
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="system">
-                      <div className="flex items-center gap-2">
-                        <Settings className="h-4 w-4" />
-                        System
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Choose your preferred color scheme
-                </p>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <Label htmlFor="language">Language</Label>
-                  <Select
-                    value={settings.interface.language}
-                    onValueChange={(value) => updateSetting('interface', 'language', value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="en">English</SelectItem>
-                      <SelectItem value="ru">Русский</SelectItem>
-                      <SelectItem value="kz">Қазақша</SelectItem>
-                      <SelectItem value="es">Español</SelectItem>
-                      <SelectItem value="fr">Français</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Label htmlFor="timezone">Timezone</Label>
-                  <Select
-                    value={settings.interface.timezone}
-                    onValueChange={(value) => updateSetting('interface', 'timezone', value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="UTC">UTC</SelectItem>
-                      <SelectItem value="Asia/Almaty">Asia/Almaty</SelectItem>
-                      <SelectItem value="Europe/London">Europe/London</SelectItem>
-                      <SelectItem value="America/New_York">America/New_York</SelectItem>
-                      <SelectItem value="America/Los_Angeles">America/Los_Angeles</SelectItem>
-                      <SelectItem value="Asia/Tokyo">Asia/Tokyo</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <Label htmlFor="date_format">Date Format</Label>
-                  <Select
-                    value={settings.interface.date_format}
-                    onValueChange={(value) => updateSetting('interface', 'date_format', value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="MM/DD/YYYY">MM/DD/YYYY</SelectItem>
-                      <SelectItem value="DD/MM/YYYY">DD/MM/YYYY</SelectItem>
-                      <SelectItem value="YYYY-MM-DD">YYYY-MM-DD</SelectItem>
-                      <SelectItem value="DD MMM YYYY">DD MMM YYYY</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Label htmlFor="time_format">Time Format</Label>
-                  <Select
-                    value={settings.interface.time_format}
-                    onValueChange={(value) => updateSetting('interface', 'time_format', value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="12">12-hour (AM/PM)</SelectItem>
-                      <SelectItem value="24">24-hour</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Account Security */}
-          <Card className="mt-6">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Shield className="h-5 w-5" />
-                Account Security
-              </CardTitle>
-              <CardDescription>
-                Manage your account security settings
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between p-4 border rounded-lg">
-                <div>
-                  <h4 className="font-medium">Change Password</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Update your account password
-                  </p>
-                </div>
-                <Button variant="outline">
-                  Change Password
-                </Button>
-              </div>
-
-              <div className="flex items-center justify-between p-4 border rounded-lg">
-                <div>
-                  <h4 className="font-medium">Two-Factor Authentication</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Add an extra layer of security to your account
-                  </p>
-                </div>
-                <Button variant="outline">
-                  Enable 2FA
-                </Button>
-              </div>
-
-              <div className="flex items-center justify-between p-4 border rounded-lg">
-                <div>
-                  <h4 className="font-medium">Login History</h4>
-                  <p className="text-sm text-muted-foreground">
-                    View your recent login activity
-                  </p>
-                </div>
-                <Button variant="outline">
-                  View History
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
-      {/* Danger Zone */}
-      <Card className="border-red-200">
+      {/* Профиль */}
+      <Card>
         <CardHeader>
-          <CardTitle className="text-red-600">Danger Zone</CardTitle>
-          <CardDescription>
-            These actions cannot be undone. Please proceed with caution.
-          </CardDescription>
+          <CardTitle className="flex items-center gap-2">
+            <User className="h-5 w-5" />
+            Профиль мастера
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center justify-between p-4 border border-red-200 rounded-lg">
-            <div>
-              <h4 className="font-medium text-red-600">Deactivate Account</h4>
-              <p className="text-sm text-muted-foreground">
-                Temporarily disable your account and stop receiving bookings
-              </p>
+          {!canEditProfile && (
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-orange-600" />
+                <span className="text-sm text-orange-800">
+                  У вас нет прав на редактирование профиля. Обратитесь к администратору.
+                </span>
+              </div>
             </div>
-            <Button variant="outline" className="border-red-200 text-red-600 hover:bg-red-50">
-              Deactivate
-            </Button>
+          )}
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="display_name">Отображаемое имя</Label>
+              <Input
+                id="display_name"
+                value={profileData.display_name}
+                onChange={(e) => setProfileData(prev => ({
+                  ...prev,
+                  display_name: e.target.value
+                }))}
+                disabled={!canEditProfile}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="experience_years">Опыт работы (лет)</Label>
+              <Input
+                id="experience_years"
+                type="number"
+                value={profileData.experience_years}
+                onChange={(e) => setProfileData(prev => ({
+                  ...prev,
+                  experience_years: parseInt(e.target.value) || 0
+                }))}
+                disabled={!canEditProfile}
+              />
+            </div>
           </div>
 
-          <div className="flex items-center justify-between p-4 border border-red-200 rounded-lg">
-            <div>
-              <h4 className="font-medium text-red-600">Delete Account</h4>
-              <p className="text-sm text-muted-foreground">
-                Permanently delete your account and all associated data
-              </p>
-            </div>
-            <Button variant="destructive">
-              Delete Account
-            </Button>
+          <div className="space-y-2">
+            <Label htmlFor="description">Описание</Label>
+            <Textarea
+              id="description"
+              value={profileData.description}
+              onChange={(e) => setProfileData(prev => ({
+                ...prev,
+                description: e.target.value
+              }))}
+              rows={3}
+              disabled={!canEditProfile}
+            />
           </div>
+
+          {canEditProfile && (
+            <Button
+              onClick={handleSaveProfile}
+              disabled={updateProfileMutation.isPending}
+            >
+              {updateProfileMutation.isPending ? (
+                <div className="flex items-center gap-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  Сохраняем...
+                </div>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-1" />
+                  Сохранить профиль
+                </>
+              )}
+            </Button>
+          )}
         </CardContent>
       </Card>
 
-      {/* Quick Actions Footer */}
-      <div className="flex items-center justify-between p-6 bg-gray-50 rounded-lg">
-        <div>
-          <h4 className="font-medium">Need Help?</h4>
-          <p className="text-sm text-muted-foreground">
-            Contact support if you have questions about these settings
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline">
-            Contact Support
-          </Button>
-          <Button variant="outline">
-            View Documentation
-          </Button>
-        </div>
-      </div>
+      {/* Разрешения */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Shield className="h-5 w-5" />
+              Права доступа
+            </div>
+            <PermissionRequestModal currentPermissions={masterProfile}>
+              <Button size="sm">
+                <Plus className="h-4 w-4 mr-1" />
+                Запросить разрешение
+              </Button>
+            </PermissionRequestModal>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Предоставленные права */}
+          {grantedPermissions.length > 0 && (
+            <div>
+              <h3 className="font-medium text-green-700 mb-2">✅ Предоставленные права</h3>
+              <div className="grid md:grid-cols-2 gap-2">
+                {grantedPermissions.map((permission) => {
+                  const Icon = PERMISSION_ICONS[permission] || CheckCircle
+                  return (
+                    <div key={permission} className="flex items-center gap-2 p-2 bg-green-50 rounded-lg">
+                      <Icon className="h-4 w-4 text-green-600" />
+                      <span className="text-sm text-green-800">
+                        {PERMISSION_LABELS[permission]}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Ограниченные права */}
+          {deniedPermissions.length > 0 && (
+            <div>
+              <h3 className="font-medium text-red-700 mb-2">❌ Ограниченные права</h3>
+              <div className="grid md:grid-cols-2 gap-2">
+                {deniedPermissions.map((permission) => {
+                  const Icon = PERMISSION_ICONS[permission] || XCircle
+                  return (
+                    <div key={permission} className="flex items-center gap-2 p-2 bg-red-50 rounded-lg">
+                      <Icon className="h-4 w-4 text-red-600" />
+                      <span className="text-sm text-red-800">
+                        {PERMISSION_LABELS[permission]}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* История запросов */}
+      {permissionRequests?.requests?.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Clock className="h-5 w-5" />
+              История запросов разрешений
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {permissionRequests.requests.map((request: PermissionRequest) => (
+              <Card key={request.id} className="border-l-4 border-l-gray-300">
+                <CardContent className="pt-4">
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-2 flex-1">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline">
+                          {PERMISSION_LABELS[`can_${request.permission_type}`] || request.permission_type}
+                        </Badge>
+                        <Badge className={STATUS_COLORS[request.status]}>
+                          {STATUS_LABELS[request.status]}
+                        </Badge>
+                      </div>
+
+                      <p className="text-sm text-gray-600">{request.reason}</p>
+
+                      {request.review_note && (
+                        <div className="bg-gray-50 p-2 rounded text-sm">
+                          <strong>Комментарий администратора:</strong> {request.review_note}
+                        </div>
+                      )}
+
+                      <div className="text-xs text-gray-500">
+                        Запрос от {new Date(request.created_at).toLocaleDateString('ru-RU')}
+                        {request.reviewed_at && (
+                          <span> • Рассмотрено {new Date(request.reviewed_at).toLocaleDateString('ru-RU')}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }
