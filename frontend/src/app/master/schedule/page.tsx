@@ -398,6 +398,21 @@ export default function MasterSchedulePage() {
                         size="sm" 
                         className="h-6 w-12 text-xs"
                         disabled={!masterInfo?.can_edit_schedule}
+                        onClick={() => {
+                          if (masterInfo?.can_edit_schedule) {
+                            // TODO: Open schedule edit dialog for this day
+                            toast({
+                              title: "Редактирование расписания",
+                              description: `Функция редактирования расписания для ${day} будет добавлена в следующем обновлении`,
+                            })
+                          } else {
+                            // Request permission
+                            toast({
+                              title: "Запрос разрешения",
+                              description: "Функция запроса разрешения будет добавлена в следующем обновлении",
+                            })
+                          }
+                        }}
                       >
                         {masterInfo?.can_edit_schedule ? 'Изменить' : 'Запросить'}
                       </Button>
@@ -413,6 +428,21 @@ export default function MasterSchedulePage() {
                   size="sm" 
                   className="mt-2"
                   disabled={!masterInfo?.can_edit_schedule}
+                  onClick={() => {
+                    if (masterInfo?.can_edit_schedule) {
+                      // TODO: Open schedule configuration dialog
+                      toast({
+                        title: "Настройка расписания",
+                        description: "Функция настройки расписания будет добавлена в следующем обновлении",
+                      })
+                    } else {
+                      // Request permission
+                      toast({
+                        title: "Запрос разрешения",
+                        description: "Функция запроса разрешения будет добавлена в следующем обновлении",
+                      })
+                    }
+                  }}
                 >
                   {masterInfo?.can_edit_schedule ? 'Настроить' : 'Запросить доступ'}
                 </Button>

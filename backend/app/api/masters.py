@@ -564,7 +564,7 @@ async def upload_photo(
         
         # Загружаем файл
         upload_service = FileUploadService()
-        photo_url = await upload_service.upload_master_photo(photo, master.id)
+        photo_url = await upload_service.upload_master_photo(str(master.id), photo)
         
         # Обновляем профиль
         master.photo_url = photo_url
@@ -910,7 +910,7 @@ async def upload_master_photo(
         
         # Загружаем файл
         upload_service = FileUploadService()
-        photo_url = await upload_service.upload_master_photo(photo, master.id)
+        photo_url = await upload_service.upload_master_photo(str(master.id), photo)
         
         # Обновляем профиль
         master.photo_url = photo_url
