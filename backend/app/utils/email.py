@@ -279,3 +279,113 @@ class EmailService:
             subject=f"Booking Cancelled - {kwargs['barbershop_name']}",
             html_content=html_content
         )
+    
+    async def send_booking_verification_email(
+        self,
+        to_email: str,
+        user_name: str,
+        verification_link: str,
+        barbershop_name: str
+    ) -> bool:
+        """Send booking verification email"""
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                    max-width: 600px;
+                    margin: 0 auto;
+                    padding: 20px;
+                }}
+                .container {{
+                    background-color: #ffffff;
+                    border-radius: 10px;
+                    padding: 30px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                }}
+                .header {{
+                    text-align: center;
+                    margin-bottom: 30px;
+                    padding-bottom: 20px;
+                    border-bottom: 2px solid #f0f0f0;
+                }}
+                .logo {{
+                    font-size: 32px;
+                    font-weight: bold;
+                    color: #000;
+                }}
+                .button {{
+                    display: inline-block;
+                    padding: 12px 30px;
+                    background-color: #000;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 5px;
+                    margin: 20px 0;
+                }}
+                .button:hover {{
+                    background-color: #333;
+                }}
+                .info-box {{
+                    background-color: #f9f9f9;
+                    border-left: 4px solid #000;
+                    padding: 15px;
+                    margin: 20px 0;
+                }}
+                .footer {{
+                    margin-top: 30px;
+                    padding-top: 20px;
+                    border-top: 2px solid #f0f0f0;
+                    text-align: center;
+                    color: #666;
+                    font-size: 12px;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <div class="logo">Jazyl</div>
+                </div>
+                
+                <h2>Verify Your Email for Booking</h2>
+                
+                <p>Hello {user_name},</p>
+                
+                <p>Thank you for choosing <strong>{barbershop_name}</strong>! To complete your booking, please verify your email address.</p>
+                
+                <div class="info-box">
+                    <p><strong>Next Step:</strong> Click the button below to verify your email and complete your booking.</p>
+                </div>
+                
+                <div style="text-align: center;">
+                    <a href="{verification_link}" class="button">Verify Email & Complete Booking</a>
+                </div>
+                
+                <p>If the button doesn't work, you can copy and paste this link into your browser:</p>
+                <p style="word-break: break-all; color: #666; font-size: 12px;">{verification_link}</p>
+                
+                <p>This verification link will expire in 24 hours for security reasons.</p>
+                
+                <div class="footer">
+                    <p>This email was sent from Jazyl - Barbershop Management Platform</p>
+                    <p>© 2025 Jazyl. All rights reserved.</p>
+                    <p style="margin-top: 10px;">
+                        <small>If you didn't request this verification, please ignore this email.</small>
+                    </p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return await self.send_email(
+            to_email=to_email,
+            subject=f"Verify Your Email - {barbershop_name}",
+            html_content=html_content
+        )

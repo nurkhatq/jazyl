@@ -81,6 +81,20 @@ async def verify_booking_email(
     # Store token in session or Redis with expiry
     # For demo, we'll return the token
     
+    # Actually send the email
+    email_sent = await email_service.send_booking_verification_email(
+        to_email=email,
+        user_name=email.split('@')[0],  # Use email prefix as name
+        verification_link=verification_link,
+        barbershop_name=tenant.name
+    )
+    
+    if not email_sent:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to send verification email"
+        )
+    
     return {
         "message": "Verification email sent",
         "token": verification_token  # Remove in production
@@ -465,6 +479,68 @@ async def get_booking(
         )
     
     return booking
+
+# --- Public endpoint for getting bookings (for public access) ---
+@router.get("/public")
+async def get_public_bookings(
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+    master_id: Optional[UUID] = Query(None),
+    status: Optional[BookingStatus] = Query(None),
+    request: Request = None,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get bookings with filters - public endpoint"""
+    service = BookingService(db)
+    
+    # Get tenant_id
+    if current_user:
+        tenant_id = current_user.tenant_id
+    else:
+        tenant_id = await get_tenant_id_from_header(request)
+    
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant ID is required"
+        )
+    
+    bookings = await service.get_bookings(
+        tenant_id=tenant_id,
+        date_from=date_from,
+        date_to=date_to,
+        master_id=master_id,
+        status=status
+    )
+    
+    # Convert to response format with client and service names
+    result = []
+    for booking in bookings:
+        result.append({
+            "id": str(booking.id),
+            "tenant_id": str(booking.tenant_id),
+            "master_id": str(booking.master_id),
+            "service_id": str(booking.service_id),
+            "client_id": str(booking.client_id),
+            "client_name": f"{booking.client.first_name} {booking.client.last_name}".strip() or "Unknown Client",
+            "service_name": booking.service.name or "Unknown Service",
+            "date": booking.date.isoformat(),
+            "end_time": booking.end_time.isoformat(),
+            "status": booking.status.value,
+            "price": booking.price,
+            "notes": booking.notes,
+            "confirmation_token": booking.confirmation_token,
+            "cancellation_token": booking.cancellation_token,
+            "confirmed_at": booking.confirmed_at.isoformat() if booking.confirmed_at else None,
+            "cancelled_at": booking.cancelled_at.isoformat() if booking.cancelled_at else None,
+            "cancellation_reason": booking.cancellation_reason,
+            "created_at": booking.created_at.isoformat(),
+            "updated_at": booking.updated_at.isoformat(),
+            "duration": int((booking.end_time - booking.date).total_seconds() / 60)
+        })
+    
+    return result
 
 # --- Public endpoints for confirmation/cancellation with tokens ---
 @router.post("/{booking_id}/confirm")

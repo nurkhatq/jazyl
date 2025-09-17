@@ -87,12 +87,12 @@ function Calendar({
 function CalendarDayButton({
   className,
   day,
-  modifiers,
+  modifiers = {},
   ...props
 }: {
   className?: string
   day: { date: Date }
-  modifiers: {
+  modifiers?: {
     selected?: boolean
     range_start?: boolean
     range_end?: boolean
@@ -103,8 +103,8 @@ function CalendarDayButton({
 }) {
   const ref = React.useRef<HTMLButtonElement>(null)
   React.useEffect(() => {
-    if (modifiers.focused) ref.current?.focus()
-  }, [modifiers.focused])
+    if (modifiers?.focused) ref.current?.focus()
+  }, [modifiers?.focused])
 
   return (
     <Button

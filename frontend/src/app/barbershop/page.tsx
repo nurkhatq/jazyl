@@ -114,7 +114,18 @@ export default function BarbershopPage() {
             <Button 
               size="lg" 
               className="px-8"
-              onClick={() => setShowBooking(!showBooking)}
+              onClick={() => {
+                setShowBooking(!showBooking)
+                if (!showBooking) {
+                  // Scroll to booking section when opening
+                  setTimeout(() => {
+                    const bookingSection = document.querySelector('[data-booking-section]')
+                    if (bookingSection) {
+                      bookingSection.scrollIntoView({ behavior: 'smooth' })
+                    }
+                  }, 100)
+                }
+              }}
             >
               <Calendar className="mr-2 h-5 w-5" />
               Book Appointment
@@ -125,9 +136,18 @@ export default function BarbershopPage() {
 
       {/* Booking Section */}
       {showBooking && (
-        <section className="py-12 bg-white border-b min-h-screen">
+        <section className="py-12 bg-white border-b min-h-screen" data-booking-section>
           <div className="container mx-auto px-4">
             <div className="max-w-4xl mx-auto">
+              <div className="mb-6">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setShowBooking(false)}
+                  className="mb-4"
+                >
+                  ← Back to Barbershop
+                </Button>
+              </div>
               <BookingFlow 
                 tenantId={tenant.id}
                 preselectedMaster={selectedMaster}

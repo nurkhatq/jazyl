@@ -759,7 +759,7 @@ export const createBooking = async (bookingData: any, tenantId?: string) => {
 }
 
 export const getBookings = async (filters?: any) => {
-  const response = await api.get('/api/bookings', { params: filters })
+  const response = await api.get('/api/bookings/public', { params: filters })
   return response.data
 }
 
