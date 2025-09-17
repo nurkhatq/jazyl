@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { getTenantBySubdomain, getMasters, getServices, getImageUrl } from '@/lib/api'
+import { getTenantBySubdomain, getPublicMasters, getPublicServices, getImageUrl } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { BookingFlow } from '@/components/booking/booking-flow'
@@ -45,8 +45,8 @@ export default function BarbershopPage() {
         
         // Загружаем мастеров и услуги
         const [mastersData, servicesData] = await Promise.all([
-          getMasters(tenantData.id),
-          getServices(tenantData.id)
+          getPublicMasters(),
+          getPublicServices()
         ])
         
         setMasters(mastersData.filter((m: any) => m.is_active && m.is_visible))
@@ -131,6 +131,7 @@ export default function BarbershopPage() {
               tenantId={tenant.id}
               preselectedMaster={selectedMaster}
               preselectedService={selectedService}
+              isPublic={true}
             />
           </div>
         </section>

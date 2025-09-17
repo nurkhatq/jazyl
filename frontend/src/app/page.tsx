@@ -125,7 +125,7 @@ export default function Home() {
       {/* Booking Flow */}
       <section className="py-12">
         <div className="container mx-auto px-4">
-          <BookingFlow tenantId={tenant.id} />
+          <BookingFlow tenantId={tenant.id} isPublic={true} />
         </div>
       </section>
 

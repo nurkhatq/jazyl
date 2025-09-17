@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useToast } from '@/hooks/use-toast'
-import { getMasters, getServices, getAvailableSlots, createBooking } from '@/lib/api'
+import { getMasters, getServices, getPublicMasters, getPublicServices, getAvailableSlots, createBooking } from '@/lib/api'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { Loader2, CheckCircle } from 'lucide-react'
 
@@ -16,9 +16,10 @@ interface BookingFlowProps {
   tenantId?: string // Сделаем опциональным, так как теперь может определяться автоматически
   preselectedMaster?: any
   preselectedService?: any
+  isPublic?: boolean // Добавляем флаг для публичного режима
 }
 
-export function BookingFlow({ tenantId, preselectedMaster, preselectedService }: BookingFlowProps) {
+export function BookingFlow({ tenantId, preselectedMaster, preselectedService, isPublic = false }: BookingFlowProps) {
   const { toast } = useToast()
   const [step, setStep] = useState(1)
   const [bookingComplete, setBookingComplete] = useState(false)
@@ -41,15 +42,15 @@ export function BookingFlow({ tenantId, preselectedMaster, preselectedService }:
 
   // Загружаем мастеров
   const { data: masters, isLoading: mastersLoading } = useQuery({
-    queryKey: ['masters', tenantId],
-    queryFn: () => getMasters(tenantId),
+    queryKey: isPublic ? ['public-masters'] : ['masters', tenantId],
+    queryFn: () => isPublic ? getPublicMasters() : getMasters(tenantId),
     staleTime: 5 * 60 * 1000, // 5 минут
   })
 
   // Загружаем услуги
   const { data: services, isLoading: servicesLoading } = useQuery({
-    queryKey: ['services', tenantId],
-    queryFn: () => getServices(tenantId),
+    queryKey: isPublic ? ['public-services'] : ['services', tenantId],
+    queryFn: () => isPublic ? getPublicServices() : getServices(tenantId),
     staleTime: 5 * 60 * 1000, // 5 минут
   })
 
