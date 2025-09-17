@@ -1016,6 +1016,58 @@ async def get_public_masters_test(request: Request):
     subdomain = request.headers.get("X-Tenant-Subdomain")
     return {"subdomain": subdomain, "message": "Test endpoint working"}
 
+@router.get("/public/{master_id}", response_model=MasterResponse)
+async def get_public_master(
+    master_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get single master for public barbershop page (no auth required)"""
+    try:
+        # Get tenant_id from X-Tenant-Subdomain header
+        subdomain = request.headers.get("X-Tenant-Subdomain")
+        print(f"🔍 [PUBLIC MASTER] Subdomain: {subdomain}, Master ID: {master_id}")
+        
+        if not subdomain:
+            print("⚠️ [PUBLIC MASTER] No subdomain provided")
+            raise HTTPException(status_code=400, detail="Subdomain required")
+        
+        # Get tenant by subdomain
+        tenant_result = await db.execute(
+            select(Tenant).where(Tenant.subdomain == subdomain)
+        )
+        tenant = tenant_result.scalar_one_or_none()
+        
+        if not tenant:
+            print("⚠️ [PUBLIC MASTER] Tenant not found for subdomain:", subdomain)
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        
+        # Get master by ID and tenant
+        master_result = await db.execute(
+            select(Master).where(
+                and_(
+                    Master.id == master_id,
+                    Master.tenant_id == tenant.id,
+                    Master.is_active == True,
+                    Master.is_visible == True
+                )
+            )
+        )
+        master = master_result.scalar_one_or_none()
+        
+        if not master:
+            print("⚠️ [PUBLIC MASTER] Master not found:", master_id)
+            raise HTTPException(status_code=404, detail="Master not found")
+        
+        print(f"✅ [PUBLIC MASTER] Found master: {master.display_name}")
+        return master
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ [PUBLIC MASTER] Error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 @router.get("/public", response_model=List[MasterResponse])
 async def get_public_masters(
     request: Request,

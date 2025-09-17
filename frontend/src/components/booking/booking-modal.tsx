@@ -205,12 +205,10 @@ export default function BookingModal({
         date: `${format(selectedDate!, 'yyyy-MM-dd')} ${selectedTime}:00`,
         client_name: clientData.name,
         client_email: clientData.email,
-        client_phone: clientData.phone,
-        email_verification_token: verificationCode,
-        price: selectedService.price
+        client_phone: clientData.phone
       }
       
-      const response = await api.post('/api/bookings/create', bookingData, {
+      const response = await api.post('/api/bookings', bookingData, {
         headers: { 'X-Tenant-ID': tenant.id }
       })
       

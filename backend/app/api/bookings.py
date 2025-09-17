@@ -76,8 +76,11 @@ async def verify_booking_email(
         raise HTTPException(status_code=404, detail="Tenant not found")
     
     # Send verification email with code
-    # For demo, we'll use a simple 6-digit code
-    verification_code = verification_token[:6].upper()
+    # Generate a 4-digit code like "1234"
+    import random
+    
+    # Generate a 4-digit code
+    verification_code = str(random.randint(1000, 9999))
     
     # Store token in session or Redis with expiry
     # For demo, we'll return the token

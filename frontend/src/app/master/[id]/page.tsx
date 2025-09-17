@@ -63,8 +63,8 @@ export default function MasterProfilePage({ params }: MasterProfileProps) {
 
       // Load master data
       const [masterRes, servicesRes] = await Promise.all([
-        api.get(`/api/masters/${params.id}`, {
-          headers: { 'X-Tenant-ID': tenantData.id }
+        api.get(`/api/masters/public/${params.id}`, {
+          headers: { 'X-Tenant-Subdomain': subdomain }
         }),
         api.get('/api/services/public', {
           headers: { 'X-Tenant-Subdomain': subdomain }
