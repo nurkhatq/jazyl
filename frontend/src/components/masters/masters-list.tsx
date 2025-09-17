@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { getMasters } from '@/lib/api'
+import { getMasters, getImageUrl } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 
@@ -61,7 +61,7 @@ export function MastersList({ tenantId }: MastersListProps) {
             <CardContent>
               {master.photo_url && (
                 <img
-                  src={master.photo_url}
+                  src={getImageUrl(master.photo_url) || ''}
                   alt={master.display_name}
                   className="w-full h-48 object-cover rounded-md mb-4"
                 />

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func, case
+from sqlalchemy import select, and_, func, case, delete
 from typing import List, Optional
 from uuid import UUID
 from datetime import date, datetime, timedelta
@@ -814,6 +814,63 @@ async def block_my_time(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to block time"
+        )
+
+@router.put("/my-schedule")
+async def update_my_schedule(
+    schedule_data: dict,
+    current_user: User = Depends(get_current_master),
+    db: AsyncSession = Depends(get_db)
+):
+    """Обновить расписание мастера"""
+    try:
+        result = await db.execute(
+            select(Master).where(Master.user_id == current_user.id)
+        )
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            raise HTTPException(status_code=404, detail="Master profile not found")
+        
+        if not master.can_edit_schedule:
+            raise HTTPException(
+                status_code=403,
+                detail="Schedule editing permission required. Contact your manager."
+            )
+        
+        # Получаем расписание из данных
+        schedules = schedule_data.get('schedules', [])
+        
+        # Удаляем старое расписание
+        await db.execute(
+            select(MasterSchedule).where(MasterSchedule.master_id == master.id)
+        )
+        await db.execute(
+            delete(MasterSchedule).where(MasterSchedule.master_id == master.id)
+        )
+        
+        # Создаем новое расписание
+        for schedule_item in schedules:
+            schedule = MasterSchedule(
+                master_id=master.id,
+                day_of_week=schedule_item['day_of_week'],
+                start_time=schedule_item['start_time'],
+                end_time=schedule_item['end_time'],
+                is_working=schedule_item.get('is_working', True)
+            )
+            db.add(schedule)
+        
+        await db.commit()
+        
+        return {"message": "Schedule updated successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in update_my_schedule: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update schedule"
         )
 
 # ---------------------- PUBLIC ENDPOINTS для клиентов ----------------------

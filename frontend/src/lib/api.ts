@@ -379,6 +379,16 @@ export const getMySchedule = async () => {
   }
 }
 
+export const updateMySchedule = async (scheduleData: any) => {
+  try {
+    const response = await api.put('/api/masters/my-schedule', scheduleData)
+    return response.data
+  } catch (error) {
+    console.error('Error updating master schedule:', error)
+    throw error
+  }
+}
+
 
 export const getMastersWithPermissions = async (tenantId?: string) => {
   try {
@@ -742,6 +752,22 @@ export const getRevenueReport = async (period: string, tenantId?: string) => {
 }
 
 // ====================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ======================
+
+/**
+ * Получить полный URL для изображения
+ */
+export const getImageUrl = (imagePath: string | null | undefined): string | null => {
+  if (!imagePath) return null
+  
+  // Если уже полный URL, возвращаем как есть
+  if (imagePath.startsWith('http')) {
+    return imagePath
+  }
+  
+  // Если относительный путь, добавляем API URL
+  const cleanPath = imagePath.startsWith('/') ? imagePath : `/${imagePath}`
+  return `${API_URL}${cleanPath}`
+}
 
 /**
  * Типы разрешений для запросов

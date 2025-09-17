@@ -24,6 +24,7 @@ import {
   X
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import { ScheduleDialog } from '@/components/dashboard/schedule-dialog'
 
 export default function MasterSchedulePage() {
   const user = useAuthStore((state) => state.user)
@@ -33,6 +34,7 @@ export default function MasterSchedulePage() {
   const [selectedDate, setSelectedDate] = useState(new Date())
   const [weekStart, setWeekStart] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }))
   const [blockDialogOpen, setBlockDialogOpen] = useState(false)
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false)
   const [blockData, setBlockData] = useState({
     start_time: '',
     end_time: '',
@@ -400,11 +402,7 @@ export default function MasterSchedulePage() {
                         disabled={!masterInfo?.can_edit_schedule}
                         onClick={() => {
                           if (masterInfo?.can_edit_schedule) {
-                            // TODO: Open schedule edit dialog for this day
-                            toast({
-                              title: "Редактирование расписания",
-                              description: `Функция редактирования расписания для ${day} будет добавлена в следующем обновлении`,
-                            })
+                            setScheduleDialogOpen(true)
                           } else {
                             // Request permission
                             toast({
@@ -430,11 +428,7 @@ export default function MasterSchedulePage() {
                   disabled={!masterInfo?.can_edit_schedule}
                   onClick={() => {
                     if (masterInfo?.can_edit_schedule) {
-                      // TODO: Open schedule configuration dialog
-                      toast({
-                        title: "Настройка расписания",
-                        description: "Функция настройки расписания будет добавлена в следующем обновлении",
-                      })
+                      setScheduleDialogOpen(true)
                     } else {
                       // Request permission
                       toast({
@@ -523,6 +517,13 @@ export default function MasterSchedulePage() {
             </CardContent>
           </Card>
         )}
+
+        {/* Schedule Configuration Dialog */}
+        <ScheduleDialog
+          open={scheduleDialogOpen}
+          onOpenChange={setScheduleDialogOpen}
+          currentSchedule={schedule}
+        />
       </div>
     </div>
   )

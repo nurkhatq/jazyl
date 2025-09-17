@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { getTenantBySubdomain, getMasters, getServices } from '@/lib/api'
+import { getTenantBySubdomain, getMasters, getServices, getImageUrl } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { BookingFlow } from '@/components/booking/booking-flow'
@@ -148,7 +148,7 @@ export default function BarbershopPage() {
                   {master.photo_url && (
                     <div className="h-48 overflow-hidden">
                       <img 
-                        src={master.photo_url} 
+                        src={getImageUrl(master.photo_url) || ''} 
                         alt={master.display_name}
                         className="w-full h-full object-cover"
                       />

@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { useAuthStore } from '@/lib/store'
-import api from '@/lib/api'
+import api, { getImageUrl } from '@/lib/api'
 import { 
   Camera, 
   Star, 
@@ -239,7 +239,7 @@ export default function MasterProfilePage() {
               <div className="w-24 h-24 bg-gray-200 rounded-full overflow-hidden mx-auto">
                 {profileData.photo_url ? (
                   <img
-                    src={profileData.photo_url}
+                    src={getImageUrl(profileData.photo_url) || ''}
                     alt="Profile"
                     className="w-full h-full object-cover"
                   />
