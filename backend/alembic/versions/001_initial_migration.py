@@ -1,4 +1,4 @@
-"""Initial migration
+"""Initial migration with all features
 
 Revision ID: 001
 Revises: 
@@ -42,7 +42,7 @@ def upgrade() -> None:
     # Create users table
     op.create_table('users',
         sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column('tenant_id', postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column('tenant_id', postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column('email', sa.String(length=255), nullable=False),
         sa.Column('phone', sa.String(length=20), nullable=True),
         sa.Column('first_name', sa.String(length=100), nullable=True),
@@ -75,7 +75,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id')
     )
 
-    # Create masters table
+    # Create masters table WITH PERMISSION FIELDS
     op.create_table('masters',
         sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column('tenant_id', postgresql.UUID(as_uuid=True), nullable=False),
@@ -88,6 +88,15 @@ def upgrade() -> None:
         sa.Column('reviews_count', sa.Integer(), nullable=True),
         sa.Column('is_active', sa.Boolean(), nullable=True),
         sa.Column('is_visible', sa.Boolean(), nullable=True),
+        # PERMISSION FIELDS
+        sa.Column('can_edit_profile', sa.Boolean(), nullable=False, server_default='true'),
+        sa.Column('can_edit_schedule', sa.Boolean(), nullable=False, server_default='false'),
+        sa.Column('can_edit_services', sa.Boolean(), nullable=False, server_default='false'),
+        sa.Column('can_manage_bookings', sa.Boolean(), nullable=False, server_default='true'),
+        sa.Column('can_view_analytics', sa.Boolean(), nullable=False, server_default='true'),
+        sa.Column('can_upload_photos', sa.Boolean(), nullable=False, server_default='true'),
+        sa.Column('experience_years', sa.Integer(), nullable=False, server_default='0'),
+        # TIMESTAMPS
         sa.Column('created_at', sa.DateTime(), nullable=True),
         sa.Column('updated_at', sa.DateTime(), nullable=True),
         sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ),
@@ -163,6 +172,36 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['service_id'], ['services.id'], ),
         sa.PrimaryKeyConstraint('id')
     )
+
+    # Create permission_requests table
+    op.create_table('permission_requests',
+        sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column('master_id', postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column('tenant_id', postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column('permission_type', sa.Enum(
+            'edit_schedule', 'edit_services', 'edit_profile', 
+            'upload_photos', 'manage_bookings', 'view_analytics', 
+            name='permissionrequesttype'
+        ), nullable=False),
+        sa.Column('reason', sa.Text(), nullable=False),
+        sa.Column('additional_info', sa.Text(), nullable=True),
+        sa.Column('status', sa.Enum(
+            'pending', 'approved', 'rejected', 
+            name='permissionrequeststatus'
+        ), nullable=False, server_default='pending'),
+        sa.Column('reviewed_by', postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column('review_note', sa.Text(), nullable=True),
+        sa.Column('reviewed_at', sa.DateTime(), nullable=True),
+        sa.Column('created_at', sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        sa.PrimaryKeyConstraint('id'),
+        sa.ForeignKeyConstraint(['master_id'], ['masters.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['reviewed_by'], ['users.id'], ondelete='SET NULL')
+    )
+    op.create_index('ix_permission_requests_master_id', 'permission_requests', ['master_id'])
+    op.create_index('ix_permission_requests_tenant_id', 'permission_requests', ['tenant_id'])
+    op.create_index('ix_permission_requests_status', 'permission_requests', ['status'])
 
     # Create bookings table
     op.create_table('bookings',
@@ -247,6 +286,7 @@ def downgrade() -> None:
     op.drop_table('notifications')
     op.drop_table('block_times')
     op.drop_table('bookings')
+    op.drop_table('permission_requests')
     op.drop_table('master_services')
     op.drop_table('master_schedules')
     op.drop_table('clients')
@@ -260,3 +300,5 @@ def downgrade() -> None:
     op.execute('DROP TYPE IF EXISTS userrole')
     op.execute('DROP TYPE IF EXISTS bookingstatus')
     op.execute('DROP TYPE IF EXISTS notificationtype')
+    op.execute('DROP TYPE IF EXISTS permissionrequesttype')
+    op.execute('DROP TYPE IF EXISTS permissionrequeststatus')
