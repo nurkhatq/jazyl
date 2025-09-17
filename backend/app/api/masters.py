@@ -29,64 +29,6 @@ from app.utils.security import get_current_master, get_current_user, require_rol
 
 router = APIRouter()
 
-# ---------------------- Public API endpoints for barbershop pages ----------------------
-
-@router.get("/public", response_model=List[MasterResponse])
-async def get_public_masters(
-    request: Request,
-    db: AsyncSession = Depends(get_db)
-):
-    """Get masters for public barbershop page (no auth required)"""
-    # Get tenant_id from X-Tenant-Subdomain header
-    subdomain = request.headers.get("X-Tenant-Subdomain")
-    if not subdomain:
-        return []
-    
-    # Get tenant by subdomain
-    tenant_result = await db.execute(
-        select(Tenant).where(Tenant.subdomain == subdomain)
-    )
-    tenant = tenant_result.scalar_one_or_none()
-    
-    if not tenant:
-        return []
-    
-    # Get visible masters for this tenant
-    masters_result = await db.execute(
-        select(Master)
-        .where(and_(
-            Master.tenant_id == tenant.id,
-            Master.is_active == True,
-            Master.is_visible == True
-        ))
-    )
-    masters = masters_result.scalars().all()
-    
-    return [
-        MasterResponse(
-            id=master.id,
-            user_id=master.user_id,
-            display_name=master.display_name,
-            specialization=master.specialization,
-            experience_years=master.experience_years,
-            rating=master.rating,
-            reviews_count=master.reviews_count,
-            bio=master.bio,
-            photo_url=master.photo_url,
-            is_active=master.is_active,
-            is_visible=master.is_visible,
-            created_at=master.created_at,
-            updated_at=master.updated_at,
-            # Public endpoints don't need permission fields
-            can_edit_profile=False,
-            can_edit_schedule=False,
-            can_edit_services=False,
-            can_manage_bookings=False,
-            can_view_analytics=False,
-            can_upload_photos=False
-        )
-        for master in masters
-    ]
 
 # ---------------------- Utility functions ----------------------
 async def get_tenant_id_from_header(request: Request) -> Optional[UUID]:
@@ -990,95 +932,7 @@ async def get_masters_list(
     return masters_data
 
 
-# ---------------------- Photo upload with master ID ----------------------
-@router.post("/{master_id}/upload-photo")
-async def upload_master_photo(
-    master_id: UUID,
-    photo: UploadFile = File(...),
-    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN, UserRole.MASTER])),
-    db: AsyncSession = Depends(get_db)
-):
-    """Загрузить фото мастера по ID"""
-    try:
-        result = await db.execute(
-            select(Master).where(Master.id == master_id)
-        )
-        master = result.scalar_one_or_none()
-        
-        if not master:
-            raise HTTPException(status_code=404, detail="Master not found")
-        
-        # Проверяем права доступа
-        if current_user.role == UserRole.MASTER:
-            # Мастер может загружать фото только для своего профиля
-            if master.user_id != current_user.id:
-                raise HTTPException(
-                    status_code=403, 
-                    detail="You can only upload photos for your own profile"
-                )
-        
-        # Проверяем тип файла
-        if not photo.content_type or not photo.content_type.startswith('image/'):
-            raise HTTPException(
-                status_code=400,
-                detail="Only image files are allowed"
-            )
-        
-        # Загружаем файл
-        upload_service = FileUploadService()
-        photo_url = await upload_service.upload_master_photo(str(master.id), photo)
-        
-        # Обновляем профиль
-        master.photo_url = photo_url
-        master.updated_at = datetime.utcnow()
-        await db.commit()
-        
-        return {"photo_url": photo_url, "message": "Photo uploaded successfully"}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error uploading master photo: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to upload photo"
-        )
 
-# ⭐ ВАЖНО: Параметрический роут /{master_id} должен быть В САМОМ КОНЦЕ!
-@router.get("/{master_id}", response_model=MasterResponse)
-async def get_master(
-    master_id: UUID,
-    request: Request,
-    db: AsyncSession = Depends(get_db)
-):
-    """Получить мастера по ID для публичного доступа"""
-    try:
-        tenant_id = await get_current_tenant(request, db)
-    except HTTPException:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tenant not specified"
-        )
-    
-    result = await db.execute(
-        select(Master).where(
-            and_(
-                Master.id == master_id,
-                Master.tenant_id == tenant_id,
-                Master.is_active == True,
-                Master.is_visible == True
-            )
-        )
-    )
-    master = result.scalar_one_or_none()
-    
-    if not master:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Master not found"
-        )
-    
-    return master
 
 # ====================== АДМИНСКИЕ ЭНДПОИНТЫ ======================
 
@@ -1105,84 +959,6 @@ async def create_master(
     
     return master
 
-@router.put("/{master_id}", response_model=MasterResponse)
-async def update_master(
-    master_id: UUID,
-    master_data: MasterUpdate,
-    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN, UserRole.MASTER])),
-    db: AsyncSession = Depends(get_db)
-):
-    """Обновить мастера"""
-    # Проверяем что мастер существует и принадлежит тому же тенанту
-    result = await db.execute(
-        select(Master).where(
-            and_(
-                Master.id == master_id,
-                Master.tenant_id == current_user.tenant_id
-            )
-        )
-    )
-    master = result.scalar_one_or_none()
-    
-    if not master:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Master not found"
-        )
-    
-    # Проверяем права доступа
-    if current_user.role == UserRole.MASTER:
-        # Мастер может обновлять только свой профиль
-        if master.user_id != current_user.id:
-            raise HTTPException(
-                status_code=403, 
-                detail="You can only update your own profile"
-            )
-    
-    # Обновляем только переданные поля
-    update_data = master_data.dict(exclude_unset=True)
-    for key, value in update_data.items():
-        if hasattr(master, key):
-            setattr(master, key, value)
-    
-    master.updated_at = datetime.utcnow()
-    await db.commit()
-    await db.refresh(master)
-    
-    return master
-
-@router.delete("/{master_id}")
-async def delete_master(
-    master_id: UUID,
-    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
-    db: AsyncSession = Depends(get_db)
-):
-    """Удалить мастера (только для владельцев/админов)"""
-    # Проверяем что мастер существует и принадлежит тому же тенанту
-    result = await db.execute(
-        select(Master).where(
-            and_(
-                Master.id == master_id,
-                Master.tenant_id == current_user.tenant_id
-            )
-        )
-    )
-    master = result.scalar_one_or_none()
-    
-    if not master:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Master not found"
-        )
-    
-    # Мягкое удаление - просто деактивируем
-    master.is_active = False
-    master.is_visible = False
-    master.updated_at = datetime.utcnow()
-    
-    await db.commit()
-    
-    return {"message": "Master deleted successfully"}
 
 @router.put("/permission-requests/{request_id}/approve")
 async def approve_permission_request(
@@ -1230,19 +1006,122 @@ async def reject_permission_request(
     
     return {"message": "Permission request rejected"}
 
-@router.put("/{master_id}/permissions", response_model=MasterResponse)
-async def update_master_permissions(
-    master_id: UUID,
-    permissions_data: MasterPermissionsUpdate,
-    current_user: User = Depends(require_role([UserRole.OWNER])),
+
+# ---------------------- Public API endpoints for barbershop pages ----------------------
+# ⭐ ВАЖНО: Эти роуты должны быть В САМОМ КОНЦЕ, после всех параметрических роутов!
+
+@router.get("/public-test")
+async def get_public_masters_test(request: Request):
+    """Test endpoint for public masters"""
+    subdomain = request.headers.get("X-Tenant-Subdomain")
+    return {"subdomain": subdomain, "message": "Test endpoint working"}
+
+@router.get("/public", response_model=List[MasterResponse])
+async def get_public_masters(
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    """Обновить права мастера (только для владельцев)"""
+    """Get masters for public barbershop page (no auth required)"""
+    try:
+        # Get tenant_id from X-Tenant-Subdomain header
+        subdomain = request.headers.get("X-Tenant-Subdomain")
+        print(f"🔍 [PUBLIC MASTERS] Subdomain: {subdomain}")
+        
+        if not subdomain:
+            print("⚠️ [PUBLIC MASTERS] No subdomain provided")
+            return []
+        
+        # Get tenant by subdomain
+        tenant_result = await db.execute(
+            select(Tenant).where(Tenant.subdomain == subdomain)
+        )
+        tenant = tenant_result.scalar_one_or_none()
+        
+        if not tenant:
+            print(f"⚠️ [PUBLIC MASTERS] No tenant found for subdomain: {subdomain}")
+            return []
+        
+        print(f"✅ [PUBLIC MASTERS] Found tenant: {tenant.name} (ID: {tenant.id})")
+        
+        # Get visible masters for this tenant
+        masters_result = await db.execute(
+            select(Master)
+            .where(and_(
+                Master.tenant_id == tenant.id,
+                Master.is_active == True,
+                Master.is_visible == True
+            ))
+        )
+        masters = masters_result.scalars().all()
+        
+        print(f"🔍 [PUBLIC MASTERS] Found {len(masters)} masters")
+        
+        result = []
+        for master in masters:
+            try:
+                master_response = MasterResponse(
+                    id=master.id,
+                    tenant_id=master.tenant_id,
+                    user_id=master.user_id,
+                    display_name=master.display_name,
+                    description=master.description,
+                    specialization=master.specialization or [],
+                    experience_years=master.experience_years or 0,
+                    rating=master.rating or 0.0,
+                    reviews_count=master.reviews_count or 0,
+                    photo_url=master.photo_url,
+                    is_active=master.is_active,
+                    is_visible=master.is_visible,
+                    created_at=master.created_at,
+                    updated_at=master.updated_at,
+                    # Public endpoints don't need permission fields
+                    can_edit_profile=False,
+                    can_edit_schedule=False,
+                    can_edit_services=False,
+                    can_manage_bookings=False,
+                    can_view_analytics=False,
+                    can_upload_photos=False
+                )
+                result.append(master_response)
+            except Exception as e:
+                print(f"❌ [PUBLIC MASTERS] Error creating MasterResponse for master {master.id}: {e}")
+                continue
+        
+        print(f"✅ [PUBLIC MASTERS] Returning {len(result)} masters")
+        return result
+        
+    except Exception as e:
+        print(f"❌ [PUBLIC MASTERS] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+# ⭐ ВАЖНО: Параметрический роут /{master_id} должен быть В САМОМ КОНЦЕ!
+@router.get("/{master_id}", response_model=MasterResponse)
+async def get_master(
+    master_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Получить мастера по ID для публичного доступа"""
+    try:
+        tenant_id = await get_current_tenant(request, db)
+    except HTTPException:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant not specified"
+        )
+    
     result = await db.execute(
         select(Master).where(
             and_(
                 Master.id == master_id,
-                Master.tenant_id == current_user.tenant_id
+                Master.tenant_id == tenant_id,
+                Master.is_active == True,
+                Master.is_visible == True
             )
         )
     )
@@ -1254,13 +1133,230 @@ async def update_master_permissions(
             detail="Master not found"
         )
     
-    # Обновляем только переданные права
-    update_data = permissions_data.dict(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(master, key, value)
-    
-    master.updated_at = datetime.utcnow()
-    await db.commit()
-    await db.refresh(master)
-    
     return master
+
+# ====================== ПАРАМЕТРИЧЕСКИЕ РОУТЫ (В САМОМ КОНЦЕ!) ======================
+# ⭐ ВАЖНО: Эти роуты должны быть ПОСЛЕ всех фиксированных роутов!
+
+@router.post("/{master_id}/upload-photo")
+async def upload_master_photo(
+    master_id: UUID,
+    photo: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Загрузить фото для конкретного мастера (только для владельцев/админов/мастеров)"""
+    try:
+        # Проверяем права доступа
+        if current_user.role not in [UserRole.OWNER, UserRole.ADMIN, UserRole.MASTER]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+        
+        # Находим мастера
+        result = await db.execute(
+            select(Master).where(Master.id == master_id)
+        )
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            raise HTTPException(status_code=404, detail="Master not found")
+        
+        # Проверяем права на загрузку фото
+        if current_user.role == UserRole.MASTER:
+            # Мастер может загружать фото только для своего профиля
+            if master.user_id != current_user.id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You can only upload photos for your own profile"
+                )
+            if not master.can_upload_photos:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Photo upload permission required. Contact your manager."
+                )
+        else:
+            # Владельцы и админы могут загружать для любого мастера
+            if master.tenant_id != current_user.tenant_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied"
+                )
+        
+        # Проверяем тип файла
+        if not photo.content_type or not photo.content_type.startswith('image/'):
+            raise HTTPException(
+                status_code=400,
+                detail="Only image files are allowed"
+            )
+        
+        # Загружаем файл
+        upload_service = FileUploadService()
+        photo_url = await upload_service.upload_master_photo(str(master.id), photo)
+        
+        # Обновляем профиль
+        master.photo_url = photo_url
+        master.updated_at = datetime.utcnow()
+        await db.commit()
+        
+        return {"photo_url": photo_url, "message": "Photo uploaded successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error uploading photo: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to upload photo"
+        )
+
+@router.put("/{master_id}", response_model=MasterResponse)
+async def update_master(
+    master_id: UUID,
+    master_data: MasterUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Обновить мастера (только для владельцев/админов/мастеров)"""
+    try:
+        # Проверяем права доступа
+        if current_user.role not in [UserRole.OWNER, UserRole.ADMIN, UserRole.MASTER]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+        
+        # Находим мастера
+        result = await db.execute(
+            select(Master).where(Master.id == master_id)
+        )
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            raise HTTPException(status_code=404, detail="Master not found")
+        
+        # Проверяем права на редактирование
+        if current_user.role == UserRole.MASTER:
+            # Мастер может редактировать только свой профиль
+            if master.user_id != current_user.id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You can only edit your own profile"
+                )
+            if not master.can_edit_profile:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Profile editing permission required. Contact your manager."
+                )
+        else:
+            # Владельцы и админы могут редактировать любого мастера
+            if master.tenant_id != current_user.tenant_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied"
+                )
+        
+        # Обновляем только переданные поля
+        update_data = master_data.dict(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(master, key, value)
+        
+        master.updated_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(master)
+        
+        return master
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error updating master: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update master"
+        )
+
+@router.delete("/{master_id}")
+async def delete_master(
+    master_id: UUID,
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_db)
+):
+    """Удалить мастера (только для владельцев/админов)"""
+    try:
+        # Находим мастера
+        result = await db.execute(
+            select(Master).where(Master.id == master_id)
+        )
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            raise HTTPException(status_code=404, detail="Master not found")
+        
+        # Проверяем что мастер из того же тенанта
+        if master.tenant_id != current_user.tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+        
+        # Удаляем мастера
+        await db.delete(master)
+        await db.commit()
+        
+        return {"message": "Master deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error deleting master: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete master"
+        )
+
+@router.put("/{master_id}/permissions", response_model=MasterResponse)
+async def update_master_permissions(
+    master_id: UUID,
+    permissions_data: MasterPermissionsUpdate,
+    current_user: User = Depends(require_role([UserRole.OWNER, UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_db)
+):
+    """Обновить права мастера (только для владельцев/админов)"""
+    try:
+        # Находим мастера
+        result = await db.execute(
+            select(Master).where(Master.id == master_id)
+        )
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            raise HTTPException(status_code=404, detail="Master not found")
+        
+        # Проверяем что мастер из того же тенанта
+        if master.tenant_id != current_user.tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+        
+        # Обновляем права
+        update_data = permissions_data.dict(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(master, key, value)
+        
+        master.updated_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(master)
+        
+        return master
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error updating master permissions: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update master permissions"
+        )
