@@ -22,16 +22,22 @@ interface BookingsTableProps {
 export function BookingsTable({ date }: BookingsTableProps) {
   const user = useAuthStore((state) => state.user)
   
-  const { data: bookings, isLoading, refetch } = useQuery({
+  const { data: bookings, isLoading, error, refetch } = useQuery({
     queryKey: ['bookings', date],
     queryFn: async () => {
-      const response = await api.get('/api/bookings/', {
-        params: {
-          date_from: date ? format(date, 'yyyy-MM-dd') : undefined,
-          date_to: date ? format(date, 'yyyy-MM-dd') : undefined,
-        }
-      })
-      return response.data
+      try {
+        const response = await api.get('/api/bookings/', {
+          params: {
+            date_from: date ? format(date, 'yyyy-MM-dd') : undefined,
+            date_to: date ? format(date, 'yyyy-MM-dd') : undefined,
+          }
+        })
+        console.log('Bookings API response:', response.data)
+        return response.data
+      } catch (error) {
+        console.error('Bookings API error:', error)
+        throw error
+      }
     },
     enabled: !!user?.tenant_id,
   })
@@ -51,6 +57,14 @@ export function BookingsTable({ date }: BookingsTableProps) {
     return <div>Loading bookings...</div>
   }
 
+  if (error) {
+    return (
+      <div className="text-center py-8 text-red-500">
+        Error loading bookings: {error.message}
+      </div>
+    )
+  }
+
   return (
     <div className="rounded-md border">
       <Table>
@@ -68,16 +82,18 @@ export function BookingsTable({ date }: BookingsTableProps) {
         <TableBody>
           {bookings?.map((booking: any) => (
             <TableRow key={booking.id}>
-              <TableCell>{format(new Date(booking.date), 'HH:mm')}</TableCell>
-              <TableCell>{booking.client_name || `Client #${booking.client_id.slice(0, 8)}`}</TableCell>
-              <TableCell>{booking.service_name || `Service #${booking.service_id.slice(0, 8)}`}</TableCell>
-              <TableCell>Master #{booking.master_id.slice(0, 8)}</TableCell>
+              <TableCell>
+                {booking.date ? format(new Date(booking.date), 'HH:mm') : 'N/A'}
+              </TableCell>
+              <TableCell>{booking.client_name || `Client #${booking.client_id?.slice(0, 8) || 'Unknown'}`}</TableCell>
+              <TableCell>{booking.service_name || `Service #${booking.service_id?.slice(0, 8) || 'Unknown'}`}</TableCell>
+              <TableCell>Master #{booking.master_id?.slice(0, 8) || 'Unknown'}</TableCell>
               <TableCell>
                 <Badge variant={booking.status === 'confirmed' ? 'default' : 'secondary'}>
-                  {booking.status}
+                  {booking.status || 'Unknown'}
                 </Badge>
               </TableCell>
-              <TableCell>${booking.price}</TableCell>
+              <TableCell>${booking.price || 0}</TableCell>
               <TableCell>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
