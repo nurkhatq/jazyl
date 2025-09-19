@@ -83,7 +83,6 @@ export default function MasterBookingsPage() {
       if (!masterInfo?.id) return []
       
       const params: any = {
-        master_id: masterInfo.id,
         date_from: dateRange.from,
         date_to: dateRange.to
       }

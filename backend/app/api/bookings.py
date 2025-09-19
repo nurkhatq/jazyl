@@ -447,6 +447,20 @@ async def get_bookings(
     """Get bookings with filters - требует авторизации"""
     service = BookingService(db)
     
+    # Если пользователь - мастер, он может видеть только свои записи
+    if current_user.role == UserRole.MASTER:
+        # Находим профиль мастера
+        result = await db.execute(
+            select(Master).where(Master.user_id == current_user.id)
+        )
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            return []
+        
+        # Мастер может видеть только свои записи
+        master_id = master.id
+    
     bookings = await service.get_bookings(
         tenant_id=current_user.tenant_id,
         date_from=date_from,
