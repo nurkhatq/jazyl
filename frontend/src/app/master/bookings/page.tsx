@@ -89,8 +89,8 @@ export default function MasterBookingsPage() {
       
       if (statusFilter !== 'all') params.status = statusFilter
       
-      const response = await api.get('/api/bookings', { params })
-      return response.data
+      const response = await api.get('/api/masters/my-bookings', { params })
+      return response.data.bookings || []
     },
     enabled: !!masterInfo?.id
   })

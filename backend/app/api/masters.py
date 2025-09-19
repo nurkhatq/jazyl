@@ -14,6 +14,8 @@ from app.database import get_db
 from app.models.user import User, UserRole
 from app.models.master import Master, MasterSchedule
 from app.models.booking import Booking, BookingStatus
+from app.models.client import Client
+from app.models.service import Service
 from app.models.tenant import Tenant
 from app.utils.email import EmailService
 from app.schemas.master import (
@@ -873,6 +875,93 @@ async def update_my_schedule(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update schedule"
         )
+
+# ---------------------- MASTER BOOKINGS ENDPOINT ----------------------
+@router.get("/my-bookings")
+async def get_my_bookings(
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+    status: Optional[BookingStatus] = Query(None),
+    current_user: User = Depends(get_current_master),
+    db: AsyncSession = Depends(get_db)
+):
+    """Получить записи мастера с фильтрацией по датам"""
+    try:
+        # Находим профиль мастера
+        result = await db.execute(
+            select(Master).where(Master.user_id == current_user.id)
+        )
+        master = result.scalar_one_or_none()
+        
+        if not master:
+            return {"bookings": [], "total_count": 0}
+        
+        # Проверяем права доступа к записям
+        if not master.can_manage_bookings:
+            return {"bookings": [], "total_count": 0}
+        
+        # Строим запрос
+        query = select(Booking).where(Booking.master_id == master.id)
+        
+        # Добавляем фильтры
+        if date_from:
+            query = query.where(Booking.date >= datetime.combine(date_from, datetime.min.time()))
+        if date_to:
+            query = query.where(Booking.date <= datetime.combine(date_to, datetime.max.time()))
+        if status:
+            query = query.where(Booking.status == status)
+        
+        # Сортируем по дате
+        query = query.order_by(Booking.date.desc())
+        
+        # Выполняем запрос
+        result = await db.execute(query)
+        bookings = result.scalars().all()
+        
+        # Формируем ответ с дополнительной информацией
+        bookings_data = []
+        for booking in bookings:
+            # Получаем информацию о клиенте
+            client_result = await db.execute(
+                select(Client).where(Client.id == booking.client_id)
+            )
+            client = client_result.scalar_one_or_none()
+            
+            # Получаем информацию об услуге
+            service_result = await db.execute(
+                select(Service).where(Service.id == booking.service_id)
+            )
+            service = service_result.scalar_one_or_none()
+            
+            bookings_data.append({
+                "id": str(booking.id),
+                "date": booking.date.isoformat(),
+                "end_time": booking.end_time.isoformat(),
+                "status": booking.status.value,
+                "price": booking.price,
+                "notes": booking.notes,
+                "client_id": str(booking.client_id),
+                "service_id": str(booking.service_id),
+                "client_name": f"{client.first_name} {client.last_name}".strip() if client else "Unknown Client",
+                "client_phone": client.phone if client else None,
+                "service_name": service.name if service else "Unknown Service",
+                "duration": int((booking.end_time - booking.date).total_seconds() / 60),
+                "created_at": booking.created_at.isoformat(),
+                "updated_at": booking.updated_at.isoformat()
+            })
+        
+        return {
+            "bookings": bookings_data,
+            "total_count": len(bookings_data)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error in get_my_bookings: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"bookings": [], "total_count": 0}
 
 # ---------------------- PUBLIC ENDPOINTS для клиентов ----------------------
 # ⭐ ВАЖНО: Эти роуты идут ПОСЛЕ специфичных роутов для мастеров!
